@@ -1,0 +1,215 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ClassificationBadge, MissedWinBadge } from "@/components/chess/classification-badge";
+import { cn } from "@/lib/utils";
+import type { MoveAnalysis } from "@/lib/analysis/types";
+import { isExplainable } from "@/lib/ai/eligibility";
+import {
+  CONFIDENCE_LABELS,
+  ERROR_TYPE_LABELS,
+  type ApiErrorBody,
+  type CachedExplanation,
+  type Explanation,
+  type ExplanationResponse,
+} from "@/lib/ai/schema";
+
+type Loaded = { explanation: Explanation; verified: boolean; cached: boolean };
+type State =
+  | { kind: "loading-cache" }
+  | { kind: "idle" }
+  | { kind: "generating"; previous: Loaded | null }
+  | { kind: "ready"; data: Loaded }
+  | { kind: "error"; message: string; code?: ApiErrorBody["code"]; previous: Loaded | null };
+
+// Cache client des explications déjà générées, partagé entre les panneaux d'une même partie.
+const gameCache = new Map<string, Promise<Map<number, CachedExplanation>>>();
+
+function loadGameCache(gameId: string): Promise<Map<number, CachedExplanation>> {
+  let pending = gameCache.get(gameId);
+  if (!pending) {
+    pending = fetch(`/api/explanations?gameId=${encodeURIComponent(gameId)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        const body = (await response.json()) as { explanations: CachedExplanation[] };
+        return new Map(body.explanations.map((item) => [item.ply, item]));
+      })
+      .catch(() => {
+        gameCache.delete(gameId); // nouvel essai au prochain affichage
+        return new Map<number, CachedExplanation>();
+      });
+    gameCache.set(gameId, pending);
+  }
+  return pending;
+}
+
+async function rememberExplanation(gameId: string, ply: number, data: ExplanationResponse) {
+  const map = await loadGameCache(gameId);
+  map.set(ply, { ply, explanation: data.explanation, verified: data.verified, createdAt: new Date().toISOString() });
+}
+
+const SECTIONS: { key: keyof Pick<Explanation, "played" | "problem" | "opponentIdea" | "bestMove" | "lesson">; title: string }[] = [
+  { key: "played", title: "Ce que j'ai joué" },
+  { key: "problem", title: "Pourquoi c'est problématique" },
+  { key: "opponentIdea", title: "Ce que l'adversaire pouvait faire" },
+  { key: "bestMove", title: "Le meilleur coup" },
+  { key: "lesson", title: "La leçon à retenir" },
+];
+
+export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveAnalysis }) {
+  const explainable = isExplainable(move);
+  const key = `${gameId}:${move.ply}`;
+  // L'état est rattaché au coup affiché : changer de coup repart de « chargement du cache ».
+  const [entry, setEntry] = useState<{ key: string; state: State } | null>(null);
+  const state: State = entry?.key === key ? entry.state : { kind: "loading-cache" };
+  const currentKey = useRef(key);
+
+  useEffect(() => {
+    currentKey.current = key;
+    if (!explainable) return;
+    let active = true;
+    loadGameCache(gameId).then((map) => {
+      if (!active) return;
+      const hit = map.get(move.ply);
+      setEntry({
+        key,
+        state: hit ? { kind: "ready", data: { explanation: hit.explanation, verified: hit.verified, cached: true } } : { kind: "idle" },
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [key, gameId, move.ply, explainable]);
+
+  if (!explainable) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Les explications IA concernent tes imprécisions, erreurs, gaffes et gains manqués.
+      </p>
+    );
+  }
+
+  const previous = state.kind === "ready" ? state.data : state.kind === "error" || state.kind === "generating" ? state.previous : null;
+
+  async function explain() {
+    const requestKey = key;
+    // Ignore la réponse si l'utilisateur est passé à un autre coup entre-temps.
+    const setState = (next: State) => {
+      if (currentKey.current === requestKey) setEntry({ key: requestKey, state: next });
+    };
+    setState({ kind: "generating", previous });
+    try {
+      const response = await fetch("/api/explanations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId, ply: move.ply }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const error = (body ?? {}) as Partial<ApiErrorBody>;
+        setState({
+          kind: "error",
+          message: error.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`,
+          code: error.code,
+          previous,
+        });
+        return;
+      }
+      const data = body as ExplanationResponse;
+      await rememberExplanation(gameId, move.ply, data);
+      setState({ kind: "ready", data: { explanation: data.explanation, verified: data.verified, cached: data.cached } });
+    } catch {
+      setState({ kind: "error", message: "Connexion au serveur impossible. Vérifie ta connexion puis réessaie.", previous });
+    }
+  }
+
+  return (
+    <section aria-labelledby={`explanation-${move.ply}`} aria-busy={state.kind === "generating"} className="space-y-4">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h2 id={`explanation-${move.ply}`} className="flex items-center gap-2 font-semibold text-primary">
+          <span className="tabular">
+            {Math.ceil(move.ply / 2)}
+            {move.color === "w" ? "." : "…"} {move.san}
+          </span>
+          <ClassificationBadge classification={move.classification} withLabel />
+          {move.missedWin ? <MissedWinBadge withLabel /> : null}
+        </h2>
+        {state.kind === "idle" ? (
+          <Button onClick={explain}>Expliquer ce coup</Button>
+        ) : state.kind === "ready" && !state.data.verified ? (
+          <Button variant="outline" onClick={explain}>
+            Générer une nouvelle explication
+          </Button>
+        ) : null}
+      </header>
+
+      {state.kind === "loading-cache" ? <Skeleton className="h-8 w-40" /> : null}
+
+      {state.kind === "generating" ? (
+        <div role="status" className="space-y-3">
+          <p className="text-sm text-muted-foreground">Claude rédige l&apos;explication à partir des calculs de Stockfish…</p>
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+        </div>
+      ) : null}
+
+      {state.kind === "error" ? (
+        <div role="alert" className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p className="text-destructive">{state.message}</p>
+          <div className="flex flex-wrap gap-2">
+            {state.code === "limit_reached" || state.code === "ai_disabled" ? (
+              <Button asChild size="sm" variant="outline">
+                <Link href="/settings">Ouvrir les paramètres</Link>
+              </Button>
+            ) : state.code !== "not_explainable" && state.code !== "not_found" ? (
+              <Button size="sm" variant="outline" onClick={explain}>
+                Réessayer
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {state.kind === "ready" ? <ExplanationBody data={state.data} bestSan={move.bestSan} /> : null}
+      {state.kind === "error" && state.previous ? <ExplanationBody data={state.previous} bestSan={move.bestSan} /> : null}
+    </section>
+  );
+}
+
+function ExplanationBody({ data, bestSan }: { data: Loaded; bestSan: string | null }) {
+  const { explanation, verified, cached } = data;
+  return (
+    <div className="space-y-4">
+      <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        <span className="font-medium">{ERROR_TYPE_LABELS[explanation.errorType]}</span>
+        <span className={cn("text-muted-foreground", explanation.confidence === "low" && "text-cls-inaccuracy")}>
+          {CONFIDENCE_LABELS[explanation.confidence]}
+        </span>
+        {cached ? <span className="text-muted-foreground">Explication enregistrée, sans nouveau coût</span> : null}
+      </p>
+
+      {!verified ? (
+        <p role="note" className="rounded-lg border border-cls-inaccuracy/40 bg-cls-inaccuracy/10 p-3 text-sm">
+          <span className="font-semibold">Explication non vérifiée.</span> Elle cite au moins un coup absent des calculs de
+          Stockfish : fie-toi aux variantes du moteur plutôt qu&apos;au texte pour ce passage.
+        </p>
+      ) : null}
+
+      <dl className="divide-y border-l-2 border-primary/20">
+        {SECTIONS.map(({ key, title }) => (
+          <div key={key} className="space-y-1 py-3 pl-4 first:pt-0 last:pb-0">
+            <dt className="text-sm font-semibold text-primary">
+              {title}
+              {key === "bestMove" && bestSan ? <span className="tabular ml-2 text-cls-best">{bestSan}</span> : null}
+            </dt>
+            <dd className={cn("max-w-prose leading-relaxed", key === "lesson" && "font-medium")}>{explanation[key]}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
