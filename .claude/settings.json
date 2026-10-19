@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "leonel-plugins": {
+      "source": {
+        "source": "directory",
+        "path": "D:\\claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "frontend-setup@leonel-plugins": true
+  }
+}
