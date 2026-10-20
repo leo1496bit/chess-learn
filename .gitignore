@@ -1,40 +1,42 @@
-
+# dépendances
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-# debug
-# dependencies
-# env files (can opt-in for committing if needed)
-# misc
-# next.js
-# production
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-# testing
-# typescript
-# vercel
-*.pem
-*.tsbuildinfo
-.claude/settings.local.json
-.DS_Store
-.env
-.env*
-.env*.local
-.next/
-.pnp.*
-.pnpm-debug.log*
-.vercel
-.yarn/*
-/.next/
-/.pnp
-/build
-/coverage
-/node_modules
-/out/
+
+# tests
 coverage/
-next-env.d.ts
-node_modules/
-npm-debug.log*
+
+# Next.js
+.next/
 out/
+/build
+
+# production
+*.pem
+
+# debug
+npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnpm-debug.log*
+
+# variables d'environnement : jamais versionnées (clé Anthropic…), sauf l'exemple documenté
+.env
+.env*
+!.env.example
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# divers
+.DS_Store
+.claude/settings.local.json
