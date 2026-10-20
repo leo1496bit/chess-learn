@@ -120,6 +120,9 @@ export async function generateBranchIdeas(params: GenerateBranchIdeasInput): Pro
 
   if (!ideas) throw new AiError("Claude n'a pas renvoyé de commentaire exploitable. Réessaie dans un instant.", 502, "invalid");
 
+  // Une régénération forcée qui échoue à la vérification ne remplace jamais des idées vérifiées.
+  if (cached?.verified && !verified) return { ...cached, cached: true };
+
   const stored = await store.saveIdeas(branchId, ideas, verified);
   return { ...stored, cached: false };
 }

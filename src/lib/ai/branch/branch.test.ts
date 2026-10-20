@@ -137,12 +137,12 @@ describe("generateBranchIdeas", () => {
 
   function fakeStore(cached: StoredBranchIdeas | null = null, summary: UsageSummary = EMPTY) {
     const usage: UsageRecord[] = [];
-    const saved: { verified: boolean }[] = [];
+    const saved: { verified: boolean; ideas: BranchIdeas }[] = [];
     const store: BranchIdeasStore = {
       findIdeas: vi.fn(async () => cached),
       usageSummary: vi.fn(async () => summary),
       saveIdeas: vi.fn(async (_id, ideas, verified) => {
-        saved.push({ verified });
+        saved.push({ verified, ideas });
         return { ideas, verified, createdAt: "2026-10-20T10:00:00Z" };
       }),
       recordUsage: vi.fn(async (record) => void usage.push(record)),
@@ -179,7 +179,7 @@ describe("generateBranchIdeas", () => {
     const { store, usage, saved } = fakeStore();
     const { client: c, create } = client(reply(GOOD));
     expect(await run(store, c)).toMatchObject({ verified: true, cached: false });
-    expect(saved).toEqual([{ verified: true }]);
+    expect(saved).toEqual([{ verified: true, ideas: GOOD }]);
     expect(usage).toHaveLength(1);
     expect(usage[0].costUsd).toBeGreaterThan(0);
     const body = create.mock.calls[0][0];
@@ -220,7 +220,7 @@ describe("generateBranchIdeas", () => {
     const { client: c, create } = client(reply(bad), reply(bad));
     expect(await run(store, c)).toMatchObject({ verified: false, cached: false });
     expect(create).toHaveBeenCalledTimes(2);
-    expect(saved).toEqual([{ verified: false }]);
+    expect(saved).toEqual([{ verified: false, ideas: bad }]);
     expect(usage.map((u) => u.status)).toEqual(["unverified", "unverified"]);
   });
 
@@ -236,6 +236,36 @@ describe("generateBranchIdeas", () => {
     const { client: c, create } = client(reply(GOOD));
     await expect(run(store, c, false, { ...SETTINGS, aiEnabled: false })).rejects.toMatchObject({ status: 429, code: "ai_disabled" });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("régénère quand la ligne en cache n'est pas vérifiée", async () => {
+    const { store, saved } = fakeStore({ ideas: { ...GOOD, plan: "Joue Qh5." }, verified: false, createdAt: "x" });
+    const { client: c, create } = client(reply(GOOD));
+    expect(await run(store, c)).toMatchObject({ verified: true, cached: false });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saved).toEqual([{ verified: true, ideas: GOOD }]);
+  });
+
+  it("limite atteinte entre la première réponse et la nouvelle tentative : garde la première, un seul appel", async () => {
+    const bad = { ...GOOD, plan: "Joue Qh5 tout de suite." };
+    const { store, usage, saved } = fakeStore();
+    const { client: c, create } = client(reply(bad), reply(GOOD));
+    const result = await run(store, c, false, { ...SETTINGS, aiDailyCallLimit: 1 });
+    expect(result).toMatchObject({ verified: false, cached: false });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(usage).toHaveLength(1);
+    expect(saved).toEqual([{ verified: false, ideas: bad }]);
+  });
+
+  it("force avec échec de vérification : ne remplace pas la ligne vérifiée en cache", async () => {
+    const bad = { ...GOOD, plan: "Joue Qh5 tout de suite." };
+    const cachedRow = { ideas: GOOD, verified: true, createdAt: "x" };
+    const { store, saved } = fakeStore(cachedRow);
+    const { client: c, create } = client(reply(bad), reply(bad));
+    const result = await run(store, c, true);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(saved).toEqual([]);
+    expect(result).toMatchObject({ ideas: GOOD, verified: true, cached: true });
   });
 
   it("est versionné", () => {
