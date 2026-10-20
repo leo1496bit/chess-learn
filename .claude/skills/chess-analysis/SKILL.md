@@ -151,6 +151,18 @@ Calculées uniquement à partir des parties importées et analysées. Afficher �
 - Sortie (`GameReportSchema`) : résumé, ouverture (appréciation, lacune théorique ou null, conseil d'étude), erreurs tactiques, erreurs stratégiques, occasions manquées, finale, points forts, plan de travail (catégorie, titre actionnable, raison, demi-coups). Vérification sur le **texte écrit** (pas de liste déclarée) et sur les demi-coups ; une nouvelle tentative avec rappel si invalide. Coût typique ≈ 0,0013 $.
 - Une lacune théorique n'est affirmée que si les données la montrent (sortie du livre par le joueur suivie d'une perte, ou réponse imprécise à une sortie adverse).
 
+## 13. Lignes d'ouverture
+
+Répertoire de lignes à maîtriser (`/openings`), construit à partir d'un préfixe (coups déjà joués) jusqu'à la sortie de l'ouverture. Code : `src/lib/repertoire/*` (purs et testés : `choose`, `tree`, `build`, `recite`, `merge`), `src/lib/lichess/explorer.ts`, `src/lib/ai/branch/*`. Seuils uniquement dans `src/lib/repertoire/constants.ts`.
+
+- **Sources des coups** : préfixe de la ligne = coups de Leonel tirés de ses parties (`game_positions`, indexées par EPD). Coups de Leonel dans l'arbre = **Stockfish** (MultiPV, depuis `position_analyses`), avec une préférence pour le coup du livre (§11) ou de l'explorateur Lichess s'il perd **moins de 2 points** de gain (`NEAR_BEST_LOSS`) ; sinon le meilleur coup. Réponses de l'adversaire : ses réponses dans les parties de Leonel d'abord (≥ `OWN_MIN_GAMES`), sinon l'explorateur Lichess (≥ 15 % des parties, `EXPLORER_MIN_SHARE`) ; **≤ 3 réponses par nœud** (`MAX_REPLIES`), **≤ 8 branches** par ligne (`MAX_BRANCHES`). Jamais de coup proposé par l'IA.
+- **Fin de branche** : passage ouverture → milieu de partie selon `phase.ts` (demi-coup > 20, ou chute de matériel), ou position terminale ; `MAX_PLY` (30) n'est qu'un plafond de sécurité (R9).
+- **Type de ligne** (`lineKind`) : `punish` si le coup qui définit la ligne perd ≥ 10 points (`PUNISH_LOSS`) pour l'adversaire, ou gambit du livre où Leonel est à ≥ 60 % (`GAMBIT_PUNISH_WIN`) ; sinon `master`. Calculé depuis les analyses, pas par l'IA.
+- **Construction** (`/api/openings/lines/[id]/build`, `rebuild`) : côté serveur, **à partir de `position_analyses` uniquement** (jamais de moteur serveur). Chaque étape renvoie les analyses manquantes (`needs`) ; le navigateur les calcule à la **profondeur demandée** par la réponse puis relance : reprenable, une échéance par étape, arrêt si aucune analyse n'avance (`BUILD_STALL_STEPS`, `BUILD_REPEAT_NEEDS`) ; une analyse incomplète n'est jamais enregistrée. `build` sur une ligne `ready` ne fait rien (arbre figé) ; seul `rebuild` la réinitialise.
+- **Explorateur Lichess** : jeton `LICHESS_TOKEN` **serveur uniquement**, créé **sans aucune autorisation (scope)**, jamais `NEXT_PUBLIC_`. Cache `explorer_cache` 30 jours (`EXPLORER_TTL_DAYS`), `EXPLORER_FETCHES_PER_STEP` requêtes max par étape ; 429 → nouvel essai ; 401 → `explorer_unavailable` (la construction continue sans explorateur).
+- **Récitation** : verdict **côté serveur** (`judgeLineMove`, route `branches/[id]/move`) ; un coup alternatif perdant **< 2 points** par rapport au coup attendu n'est pas une erreur. **Révision espacée** SM-2 (`branches/[id]/review`) : succès = aucun coup révélé et ≤ 1 indice.
+- **IA par branche**, à la demande seulement (`branches/[id]/explain`, prompt `branch-v1`) : entrée construite côté serveur à partir de l'arbre, sortie vérifiée sur le texte (coups et noms) ; **ne jamais écraser un cache vérifié par un résultat non vérifié** (`opening_branch_explanations`). Les noms d'ouvertures et de gambits ne viennent que du livre (§11).
+
 ## Checklist avant de terminer une tâche d'analyse
 
 - [ ] Scores normalisés en point de vue Blancs, conversion joueur au moment de classer
@@ -161,3 +173,4 @@ Calculées uniquement à partir des parties importées et analysées. Afficher �
 - [ ] Appel IA uniquement à la demande, avec cache, limites et suivi `ai_usage`
 - [ ] Noms d'ouvertures et de gambits uniquement issus du livre (§11), calculés côté serveur
 - [ ] Tests unitaires mis à jour pour les fonctions pures modifiées
+- [ ] Lignes d'ouverture (§13) : coups de Leonel par Stockfish, réponses adverses des parties puis de l'explorateur, construction depuis le cache, verdict de récitation côté serveur, IA par branche vérifiée

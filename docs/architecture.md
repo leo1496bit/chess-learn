@@ -33,6 +33,27 @@ Chess.com API ──(serveur: /api/sync)──► games (Supabase)
 (`book.ts`) ; `identifyOpening` / `theoryForPly` (purs) situent chaque coup dans la théorie. La page
 `/games/[id]` calcule l'ouverture côté serveur et la passe au client.
 
+### Lignes d'ouverture à maîtriser
+
+```
+parties (games) ─► game_positions (EPD, 30 premiers demi-coups) ─► RPC opening_position_stats / opening_root_stats / opening_reply_stats
+page /openings ─► POST /api/openings/lines (suggestion ou ajout manuel) ─► opening_lines
+page /openings/[id] ─► POST /api/openings/lines/[id]/build (boucle) ─► arbre + opening_branches
+        ▲                          │ réponse : analyses manquantes (needs, profondeur demandée)
+        └── Stockfish (navigateur) ┘ ─► position_analyses (cache) ; explorateur Lichess ─► explorer_cache (30 j)
+récitation ─► POST /api/openings/branches/[id]/move (verdict serveur) ; /review (SM-2)
+« Expliquer la branche » ─► POST /api/openings/branches/[id]/explain ─► Claude Haiku 5.5 ─► opening_branch_explanations + ai_usage
+```
+
+- Tables (migration `20261021000000_opening_lines.sql`, RLS) : `game_positions`, `opening_lines`,
+  `opening_branches`, `opening_branch_explanations`, `explorer_cache`. RPC : `opening_reply_stats`,
+  `opening_position_stats`, `opening_root_stats`.
+- Routes `/api/openings` : `backfill`, `search`, `lines` (+ `lines/[id]/build`, `rebuild`),
+  `branches/[id]/move`, `review`, `explain`. Pages : `/openings` (bibliothèque, suggestions) et
+  `/openings/[id]` (arbre, étude, récitation).
+- Code : `src/lib/repertoire/*` (pur, testé), `src/lib/lichess/explorer.ts` (jeton `LICHESS_TOKEN` serveur
+  uniquement, sans autorisation), `src/lib/ai/branch/*`. Règles : skill chess-analysis §13.
+
 ## Contrats entre modules
 
 ### Moteur — `src/lib/engine/` (propriétaire : module Analyse)
