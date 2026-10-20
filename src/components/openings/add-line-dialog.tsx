@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MAX_PLY } from "@/lib/repertoire/constants";
+import { playerColorForName } from "@/lib/repertoire/library";
 import { cn } from "@/lib/utils";
 import { createLine } from "./create-line";
 
@@ -124,8 +125,9 @@ function SearchName() {
   const [hits, setHits] = useState<Hit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Hit | null>(null);
-  const [color, setColor] = useState<Color>("w");
   const { pending, error, create, clearError } = useCreate();
+  // Le camp découle du nom : la ligne s'arrête sur le dernier coup du nom, joué par l'adversaire.
+  const color: Color = selected ? playerColorForName(selected.uci) : "w";
   const searching = query.trim().length >= 2;
 
   useEffect(() => {
@@ -195,7 +197,10 @@ function SearchName() {
           <p className="text-sm">
             <span className="font-semibold">{selected.name}</span>
           </p>
-          <ColorChoice value={color} onChange={setColor} />
+          <p className="text-sm text-muted-foreground">
+            Ton camp : <span className="font-medium text-foreground">{color === "w" ? "les Blancs" : "les Noirs"}</span>{" "}
+            (le dernier coup du nom est celui de ton adversaire).
+          </p>
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}

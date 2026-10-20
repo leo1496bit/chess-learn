@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatLineStats, kindLabel, sortLines, type LibraryLine } from "./library";
+import { formatLineStats, kindLabel, playerColorForName, sortLines, type LibraryLine } from "./library";
 
 const line = (o: Partial<LibraryLine>): LibraryLine => ({
   id: "a", name: "X", eco: null, playerColor: "w", kind: "master", status: "ready",
@@ -41,5 +41,17 @@ describe("kindLabel", () => {
     expect(kindLabel("master", "ready")).toBe("À maîtriser");
     expect(kindLabel(null, "building")).toBe("En construction");
     expect(kindLabel("master", "building")).toBe("En construction");
+  });
+});
+
+describe("playerColorForName", () => {
+  it("nombre impair de coups : le dernier est blanc, Leonel joue les Noirs", () => {
+    expect(playerColorForName("e2e4")).toBe("b");
+    expect(playerColorForName("e2e4 c7c6 d2d4")).toBe("b");
+  });
+
+  it("nombre pair de coups : le dernier est noir, Leonel joue les Blancs", () => {
+    expect(playerColorForName("e2e4 c7c6")).toBe("w");
+    expect(playerColorForName(" e2e4  e7e5 g1f3 b8c6 ")).toBe("w");
   });
 });

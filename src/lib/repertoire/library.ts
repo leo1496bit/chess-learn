@@ -31,3 +31,12 @@ export function kindLabel(kind: string | null, status: string): string {
   if (status !== "ready" || !kind) return "En construction";
   return kind === "punish" ? "À punir" : "À maîtriser";
 }
+
+/**
+ * Camp de Leonel pour une ligne ajoutée par nom du livre (`uci` : coups séparés par des espaces).
+ * La ligne s'arrête sur un coup adverse : nombre impair de coups → le dernier est blanc → Leonel joue
+ * les Noirs ; nombre pair → les Blancs.
+ */
+export function playerColorForName(uci: string): "w" | "b" {
+  return uci.split(" ").filter(Boolean).length % 2 === 1 ? "b" : "w";
+}
