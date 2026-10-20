@@ -265,6 +265,30 @@ export type Database = {
           },
         ]
       }
+      explorer_cache: {
+        Row: {
+          data: Json
+          epd: string
+          fetched_at: string
+          params: string
+          user_id: string
+        }
+        Insert: {
+          data: Json
+          epd: string
+          fetched_at?: string
+          params: string
+          user_id?: string
+        }
+        Update: {
+          data?: Json
+          epd?: string
+          fetched_at?: string
+          params?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       game_analyses: {
         Row: {
           created_at: string
@@ -301,6 +325,47 @@ export type Database = {
             foreignKeyName: "game_analyses_game_id_fkey"
             columns: ["game_id"]
             isOneToOne: true
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      game_positions: {
+        Row: {
+          epd: string
+          game_id: string
+          move_san: string | null
+          move_uci: string | null
+          path_uci: string
+          ply: number
+          side_to_move: string
+          user_id: string
+        }
+        Insert: {
+          epd: string
+          game_id: string
+          move_san?: string | null
+          move_uci?: string | null
+          path_uci: string
+          ply: number
+          side_to_move: string
+          user_id?: string
+        }
+        Update: {
+          epd?: string
+          game_id?: string
+          move_san?: string | null
+          move_uci?: string | null
+          path_uci?: string
+          ply?: number
+          side_to_move?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_positions_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
             referencedRelation: "games"
             referencedColumns: ["id"]
           },
@@ -367,6 +432,7 @@ export type Database = {
           player_accuracy: number | null
           player_color: string
           ply_count: number
+          positions_indexed: boolean
           rated: boolean | null
           result: string
           result_detail: string | null
@@ -393,6 +459,7 @@ export type Database = {
           player_accuracy?: number | null
           player_color: string
           ply_count?: number
+          positions_indexed?: boolean
           rated?: boolean | null
           result: string
           result_detail?: string | null
@@ -419,6 +486,7 @@ export type Database = {
           player_accuracy?: number | null
           player_color?: string
           ply_count?: number
+          positions_indexed?: boolean
           rated?: boolean | null
           result?: string
           result_detail?: string | null
@@ -523,6 +591,178 @@ export type Database = {
           },
         ]
       }
+      opening_branch_explanations: {
+        Row: {
+          branch_id: string
+          content: Json
+          created_at: string
+          id: number
+          model: string
+          prompt_version: string
+          user_id: string
+          verified: boolean
+        }
+        Insert: {
+          branch_id: string
+          content: Json
+          created_at?: string
+          id?: never
+          model: string
+          prompt_version: string
+          user_id?: string
+          verified?: boolean
+        }
+        Update: {
+          branch_id?: string
+          content?: Json
+          created_at?: string
+          id?: never
+          model?: string
+          prompt_version?: string
+          user_id?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opening_branch_explanations_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "opening_branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      opening_branches: {
+        Row: {
+          archived: boolean
+          attempts: number
+          due_at: string
+          end_fen: string
+          explorer_games: number
+          id: string
+          interval_days: number
+          last_result: string | null
+          line_id: string
+          own_games: number
+          path_san: string[]
+          path_uci: string[]
+          studied_at: string | null
+          successes: number
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          attempts?: number
+          due_at?: string
+          end_fen: string
+          explorer_games?: number
+          id?: string
+          interval_days?: number
+          last_result?: string | null
+          line_id: string
+          own_games?: number
+          path_san: string[]
+          path_uci: string[]
+          studied_at?: string | null
+          successes?: number
+          user_id?: string
+        }
+        Update: {
+          archived?: boolean
+          attempts?: number
+          due_at?: string
+          end_fen?: string
+          explorer_games?: number
+          id?: string
+          interval_days?: number
+          last_result?: string | null
+          line_id?: string
+          own_games?: number
+          path_san?: string[]
+          path_uci?: string[]
+          studied_at?: string | null
+          successes?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opening_branches_line_id_fkey"
+            columns: ["line_id"]
+            isOneToOne: false
+            referencedRelation: "opening_lines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      opening_lines: {
+        Row: {
+          built_at: string | null
+          created_at: string
+          depth: number | null
+          draws: number
+          eco: string | null
+          explorer_unavailable: boolean
+          games: number
+          id: string
+          kind: string | null
+          losses: number
+          multipv: number | null
+          name: string
+          player_color: string
+          prefix_san: string[]
+          prefix_uci: string[]
+          root_epd: string
+          root_fen: string
+          status: string
+          user_id: string
+          wins: number
+        }
+        Insert: {
+          built_at?: string | null
+          created_at?: string
+          depth?: number | null
+          draws?: number
+          eco?: string | null
+          explorer_unavailable?: boolean
+          games?: number
+          id?: string
+          kind?: string | null
+          losses?: number
+          multipv?: number | null
+          name: string
+          player_color: string
+          prefix_san?: string[]
+          prefix_uci?: string[]
+          root_epd: string
+          root_fen: string
+          status?: string
+          user_id?: string
+          wins?: number
+        }
+        Update: {
+          built_at?: string | null
+          created_at?: string
+          depth?: number | null
+          draws?: number
+          eco?: string | null
+          explorer_unavailable?: boolean
+          games?: number
+          id?: string
+          kind?: string | null
+          losses?: number
+          multipv?: number | null
+          name?: string
+          player_color?: string
+          prefix_san?: string[]
+          prefix_uci?: string[]
+          root_epd?: string
+          root_fen?: string
+          status?: string
+          user_id?: string
+          wins?: number
+        }
+        Relationships: []
+      }
       position_analyses: {
         Row: {
           created_at: string
@@ -609,6 +849,39 @@ export type Database = {
         }[]
       }
       is_owner: { Args: never; Returns: boolean }
+      opening_position_stats: {
+        Args: { p_max_ply: number; p_min_games: number }
+        Returns: {
+          draws: number
+          epd: string
+          games: number
+          losses: number
+          player_color: string
+          top_path: string
+          wins: number
+        }[]
+      }
+      opening_reply_stats: {
+        Args: { p_epd: string }
+        Returns: {
+          draws: number
+          games: number
+          losses: number
+          move_san: string
+          move_uci: string
+          wins: number
+        }[]
+      }
+      opening_root_stats: {
+        Args: { p_epd: string }
+        Returns: {
+          draws: number
+          games: number
+          losses: number
+          top_path: string
+          wins: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
