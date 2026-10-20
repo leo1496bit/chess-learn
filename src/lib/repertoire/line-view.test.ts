@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchMoveLinks, branchPositions, branchStatus, buildLineTree, startBuildGuard, stepBuildGuard } from "./line-view";
+import { branchMoveLinks, branchPositions, branchStatus, buildLineTree, replyGamesLabel, startBuildGuard, stepBuildGuard } from "./line-view";
 
 const ROOT_W = "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"; // après 1. e4 c6, Blancs au trait
 
@@ -126,5 +126,16 @@ describe("branchPositions", () => {
       ["d5", "d7d5", "played"],
     ]);
     expect(links[0].fen).toBe(ROOT_W);
+  });
+});
+
+describe("replyGamesLabel", () => {
+  it("compte les parties de Leonel quand il a rencontré la réponse", () => {
+    expect(replyGamesLabel(1)).toBe("1 partie");
+    expect(replyGamesLabel(31)).toBe("31 parties");
+  });
+
+  it("indique Lichess quand la réponse ne vient que de l'explorateur", () => {
+    expect(replyGamesLabel(0)).toBe("Lichess");
   });
 });

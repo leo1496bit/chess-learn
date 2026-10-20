@@ -32,6 +32,12 @@ export type TreeMove = {
   branchId: string;
 };
 
+/** Libellé d'une réponse adverse : parties de Leonel, ou « Lichess » si elle ne vient que de l'explorateur. */
+export function replyGamesLabel(ownGames: number): string {
+  if (ownGames === 0) return "Lichess";
+  return `${ownGames} partie${ownGames > 1 ? "s" : ""}`;
+}
+
 /** Suite de coups sans embranchement, puis ses variantes. */
 export type TreeSegment = {
   moves: TreeMove[];

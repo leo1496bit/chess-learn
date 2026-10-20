@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import {
   BRANCH_STATUS_LABELS,
   buildLineTree,
+  replyGamesLabel,
   type BranchStatus,
   type LinePageBranch,
   type TreeMove,
@@ -78,7 +79,8 @@ export function LineTree({ rootFen, prefixSan, branches, statuses, selectedId, o
         root
       />
       <p className="text-xs text-muted-foreground">
-        En gras : tes coups. Le nombre de parties indique combien de fois l&apos;adversaire a joué cette réponse contre toi.
+        En gras : tes coups. Le nombre de parties indique combien de fois l&apos;adversaire a joué cette réponse contre toi ;
+        « Lichess » : réponse courante sur Lichess que tu n&apos;as pas encore rencontrée.
       </p>
     </div>
   );
@@ -138,7 +140,7 @@ function SegmentItem({ segment, selectedSan, onPath, ...props }: Omit<ListProps,
               </button>
               {move.ownGames !== null ? (
                 <span className="ml-1 text-xs text-muted-foreground">
-                  {move.ownGames} partie{move.ownGames > 1 ? "s" : ""}
+                  {replyGamesLabel(move.ownGames)}
                 </span>
               ) : null}
             </span>
