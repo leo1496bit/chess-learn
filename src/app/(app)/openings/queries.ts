@@ -32,7 +32,13 @@ export async function loadOpenings(supabase: SupabaseServerClient, now: Date): P
     supabase
       .from("opening_lines")
       .select("id, name, eco, player_color, kind, status, games, wins, draws, losses, root_epd"),
-    supabase.from("opening_branches").select("line_id").eq("archived", false).lte("due_at", now.toISOString()),
+    // Branches à revoir : déjà étudiées (comme le lien vers /training), non archivées, échéance passée.
+    supabase
+      .from("opening_branches")
+      .select("line_id")
+      .eq("archived", false)
+      .not("studied_at", "is", null)
+      .lte("due_at", now.toISOString()),
     supabase.rpc("opening_position_stats", { p_min_games: SUGGESTION_MIN_GAMES, p_max_ply: SUGGESTION_MAX_PLY }),
     countGames(supabase, false),
     countGames(supabase, true),
