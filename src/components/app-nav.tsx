@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { BarChart3, Dumbbell, LayoutDashboard, ListChecks, Menu, Settings } from "lucide-react";
+import { BarChart3, BookOpen, Dumbbell, LayoutDashboard, ListChecks, Menu, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { signOut } from "@/app/login/actions";
@@ -12,6 +12,7 @@ import { signOut } from "@/app/login/actions";
 const LINKS = [
   { href: "/", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/games", label: "Mes parties", icon: ListChecks },
+  { href: "/openings", label: "Ouvertures", icon: BookOpen },
   { href: "/training", label: "Entraînement", icon: Dumbbell },
   { href: "/stats", label: "Statistiques", icon: BarChart3 },
   { href: "/settings", label: "Paramètres", icon: Settings },
