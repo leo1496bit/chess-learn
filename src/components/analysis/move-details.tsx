@@ -19,7 +19,8 @@ function EvalCell({ label, value, win }: { label: string; value: string; win: nu
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="tabular text-lg font-semibold">
         {value}
-        <span className="ml-1.5 text-xs font-normal text-muted-foreground">{Math.round(win)} %</span>
+        {/* Sous la valeur sur mobile (colonnes étroites), à côté à partir de sm. */}
+        <span className="block text-xs font-normal text-muted-foreground sm:ml-1.5 sm:inline">{Math.round(win)} %</span>
       </dd>
     </div>
   );
@@ -115,7 +116,7 @@ export function MoveDetails({
           <dt className="text-xs text-muted-foreground">Perte</dt>
           <dd className={cn("tabular text-lg font-semibold", move.loss >= 5 && "text-cls-mistake")}>
             {move.loss < 0.5 ? "0" : `−${move.loss.toFixed(1)}`}
-            <span className="ml-1.5 text-xs font-normal text-muted-foreground">précision {Math.round(move.accuracy)}</span>
+            <span className="block text-xs font-normal text-muted-foreground sm:ml-1.5 sm:inline">précision {Math.round(move.accuracy)}</span>
           </dd>
         </div>
       </dl>

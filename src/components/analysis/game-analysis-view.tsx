@@ -13,6 +13,8 @@ import { theoryForPly, type OpeningReport } from "@/lib/openings/identify";
 import { toast } from "sonner";
 import { isErrorClassification } from "@/lib/analysis/classify";
 import { extractPositions } from "@/lib/analysis/game";
+import { formatEvaluation } from "@/lib/analysis/win";
+import { cn } from "@/lib/utils";
 import type { Color, EngineSettings, GameAnalysisSummary, MoveAnalysis, Thresholds } from "@/lib/analysis/types";
 import { AnalyzePanel } from "./analyze-panel";
 import { EvalGraph } from "./eval-graph";
@@ -205,13 +207,15 @@ export function GameAnalysisView({
         {/*
           L'échiquier reste visible pendant la lecture des explications :
           - grand écran : toute la colonne est collante, à une taille qui tient dans la hauteur de l'écran ;
-          - mobile : l'échiquier et la navigation restent épinglés sous l'en-tête, à environ 40 % de la hauteur,
-            pendant toute la lecture des onglets.
+          - mobile : l'échiquier (≈ 34 % de la hauteur) et une seule ligne de navigation restent épinglés sous
+            l'en-tête pendant toute la lecture des onglets.
         */}
         {/* « contents » sous lg : le bloc épinglé devient un enfant direct de la grille, qui contient aussi les onglets. */}
         <div className="contents lg:block lg:sticky lg:top-6 lg:max-w-[calc(100dvh-14rem)] lg:space-y-3 lg:self-start">
-          <div className="sticky top-14 z-20 -mx-4 space-y-2 bg-background/95 px-4 pt-2 pb-2 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:space-y-3 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
-          <div className="mx-auto flex max-w-[min(100%,40dvh)] flex-col gap-2 lg:max-w-none lg:flex-row">
+          {/* Fond prolongé jusqu'aux bords par une ombre (coupée en haut et en bas) : pas de marge négative, donc aucun débordement horizontal. */}
+          <div className="sticky top-14 z-20 space-y-2 bg-background py-2 shadow-[0_0_0_100vmax_var(--background)] [clip-path:inset(0_-100vmax)] lg:static lg:space-y-3 lg:bg-transparent lg:py-0 lg:shadow-none lg:[clip-path:none]">
+          {/* Largeur = échiquier (34dvh) + barre d'évaluation fine (0.625rem) + écart (0.5rem). */}
+          <div className="mx-auto flex max-w-[min(100%,calc(34dvh+1.125rem))] flex-row gap-2 lg:max-w-none">
             <EvalBar evaluation={evaluation} orientation={orientation} sideToMove={sideToMove} className={moves ? undefined : "opacity-40"} />
             <ChessBoard
               id={`game-${game.id}`}
@@ -222,7 +226,11 @@ export function GameAnalysisView({
             />
           </div>
 
-          <nav aria-label="Navigation dans la partie" className="flex flex-wrap items-center justify-center gap-1 lg:justify-start lg:pl-9">
+          <nav aria-label="Navigation dans la partie" className="flex items-center justify-center gap-1 lg:flex-wrap lg:justify-start lg:pl-9">
+            {/* Sur mobile, la barre d'évaluation n'a pas de libellé : la valeur est affichée ici. */}
+            <span className={cn("tabular mr-1 min-w-12 text-sm font-semibold lg:hidden", !moves && "text-muted-foreground")} aria-hidden>
+              {evaluation ? formatEvaluation(evaluation, sideToMove) : "—"}
+            </span>
             <Button variant="outline" size="icon" aria-label="Premier coup" onClick={() => go(0)} disabled={ply === 0}>
               <ChevronFirst />
             </Button>
@@ -239,9 +247,9 @@ export function GameAnalysisView({
               <ArrowDownUp />
             </Button>
             {nextError ? (
-              <Button variant="secondary" className="ml-auto" onClick={() => go(nextError.ply)}>
+              <Button variant="secondary" className="ml-1 max-lg:size-9 max-lg:px-0 lg:ml-auto" aria-label="Erreur suivante" onClick={() => go(nextError.ply)}>
                 <SkipForward data-icon="inline-start" />
-                Erreur suivante
+                <span className="max-lg:sr-only">Erreur suivante</span>
               </Button>
             ) : null}
           </nav>
@@ -286,7 +294,7 @@ export function GameAnalysisView({
               </div>
             ) : null}
             <div className="rounded-lg border bg-card">
-              <MoveList moves={listItems} currentPly={ply} onSelect={go} className="max-h-[28rem]" />
+              <MoveList moves={listItems} currentPly={ply} onSelect={go} className="lg:max-h-[28rem]" />
             </div>
           </TabsContent>
           <TabsContent value="report">
