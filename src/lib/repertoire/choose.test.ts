@@ -20,7 +20,10 @@ function after(fen: string, san: string): string {
   return chess.fen();
 }
 
-function analysis(fen: string, lines: { uci: string; cp: number }[]): PositionAnalysis {
+function analysis(
+  fen: string,
+  lines: { uci: string; cp: number }[],
+): PositionAnalysis {
   return {
     fen,
     depth: 16,
@@ -62,7 +65,10 @@ describe("playerCandidates", () => {
   });
 
   it("ignore un coup d'explorateur illégal", () => {
-    const explorer = { total: 10, moves: [{ uci: "e2e5", san: "e5", games: 10, share: 1 }] };
+    const explorer = {
+      total: 10,
+      moves: [{ uci: "e2e5", san: "e5", games: 10, share: 1 }],
+    };
     expect(playerCandidates(START, {}, explorer)).toEqual([]);
   });
 });
@@ -71,22 +77,36 @@ describe("choosePlayerMove", () => {
   it("préfère le candidat du livre quasi meilleur", () => {
     const a = analysis(START, [{ uci: "d2d4", cp: 40 }]);
     const evals = new Map([["e2e4", { cp: 25, mate: null }]]);
-    expect(choosePlayerMove(a, evals, "w")).toEqual({ uci: "e2e4", fromBook: true });
+    expect(choosePlayerMove(a, evals, "w", ["e2e4"])).toEqual({
+      uci: "e2e4",
+      fromBook: true,
+    });
   });
 
   it("retient le meilleur coup si le candidat est trop faible", () => {
     const a = analysis(START, [{ uci: "d2d4", cp: 40 }]);
     const evals = new Map([["e2e4", { cp: -60, mate: null }]]);
-    expect(choosePlayerMove(a, evals, "w")).toEqual({ uci: "d2d4", fromBook: false });
+    expect(choosePlayerMove(a, evals, "w", ["e2e4"])).toEqual({
+      uci: "d2d4",
+      fromBook: false,
+    });
   });
 
   it("côté Noirs : scores convertis au point de vue du joueur", () => {
     const a = analysis(AFTER_E4, [{ uci: "c7c5", cp: -40 }]);
-    expect(choosePlayerMove(a, new Map([["e7e5", { cp: -25, mate: null }]]), "b")).toEqual({
+    expect(
+      choosePlayerMove(a, new Map([["e7e5", { cp: -25, mate: null }]]), "b", [
+        "e7e5",
+      ]),
+    ).toEqual({
       uci: "e7e5",
       fromBook: true,
     });
-    expect(choosePlayerMove(a, new Map([["e7e5", { cp: 60, mate: null }]]), "b")).toEqual({
+    expect(
+      choosePlayerMove(a, new Map([["e7e5", { cp: 60, mate: null }]]), "b", [
+        "e7e5",
+      ]),
+    ).toEqual({
       uci: "c7c5",
       fromBook: false,
     });
@@ -97,13 +117,27 @@ describe("choosePlayerMove", () => {
       { uci: "d2d4", cp: 40 },
       { uci: "e2e4", cp: 38 },
     ]);
-    expect(choosePlayerMove(a, new Map(), "w", ["d2d4"])).toEqual({ uci: "d2d4", fromBook: true });
-    expect(choosePlayerMove(a, new Map(), "w", ["e2e4"])).toEqual({ uci: "e2e4", fromBook: true });
+    expect(choosePlayerMove(a, new Map(), "w", ["d2d4"])).toEqual({
+      uci: "d2d4",
+      fromBook: true,
+    });
+    expect(choosePlayerMove(a, new Map(), "w", ["e2e4"])).toEqual({
+      uci: "e2e4",
+      fromBook: true,
+    });
+  });
+
+  it("lève une erreur sans ligne d'analyse", () => {
+    const a = { ...analysis(START, []), lines: [] };
+    expect(() => choosePlayerMove(a, new Map(), "w", ["e2e4"])).toThrow();
   });
 
   it("ignore un candidat sans évaluation", () => {
     const a = analysis(START, [{ uci: "d2d4", cp: 40 }]);
-    expect(choosePlayerMove(a, new Map(), "w", ["e2e4"])).toEqual({ uci: "d2d4", fromBook: false });
+    expect(choosePlayerMove(a, new Map(), "w", ["e2e4"])).toEqual({
+      uci: "d2d4",
+      fromBook: false,
+    });
   });
 });
 
@@ -119,11 +153,29 @@ describe("candidatesNeedingEval", () => {
 
 describe("lineKind", () => {
   it("punish si perte >= PUNISH_LOSS", () => {
-    expect(lineKind({ lossOfDefiningMove: 12, bookName: null, playerWinAtRoot: 50 })).toBe("punish");
+    expect(
+      lineKind({ lossOfDefiningMove: 12, bookName: null, playerWinAtRoot: 50 }),
+    ).toBe("punish");
   });
   it("punish pour un gambit où le joueur est bien", () => {
     expect(
-      lineKind({ lossOfDefiningMove: 4, bookName: "Englund Gambit", playerWinAtRoot: 65 }),
+      lineKind({
+        lossOfDefiningMove: 4,
+        bookName: "Englund Gambit",
+        playerWinAtRoot: 65,
+      }),
+    ).toBe("punish");
+  });
+  it("bornes : perte 10 et victoire 60 comptent", () => {
+    expect(
+      lineKind({ lossOfDefiningMove: 10, bookName: null, playerWinAtRoot: 50 }),
+    ).toBe("punish");
+    expect(
+      lineKind({
+        lossOfDefiningMove: 0,
+        bookName: "Englund Gambit",
+        playerWinAtRoot: 60,
+      }),
     ).toBe("punish");
   });
   it("master sinon", () => {
@@ -135,7 +187,11 @@ describe("lineKind", () => {
       }),
     ).toBe("master");
     expect(
-      lineKind({ lossOfDefiningMove: 4, bookName: "Englund Gambit", playerWinAtRoot: 55 }),
+      lineKind({
+        lossOfDefiningMove: 4,
+        bookName: "Englund Gambit",
+        playerWinAtRoot: 55,
+      }),
     ).toBe("master");
   });
 });
@@ -143,18 +199,46 @@ describe("lineKind", () => {
 describe("branchEnds", () => {
   const mate = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
   it("vrai au demi-coup 30", () => {
-    expect(branchEnds({ fen: START, ply: 30, ownGames: 10, explorerTotal: 1000 })).toBe(true);
+    expect(
+      branchEnds({ fen: START, ply: 30, ownGames: 10, explorerTotal: 1000 }),
+    ).toBe(true);
   });
   it("vrai pour un mat", () => {
-    expect(branchEnds({ fen: mate, ply: 4, ownGames: 10, explorerTotal: 1000 })).toBe(true);
+    expect(
+      branchEnds({ fen: mate, ply: 4, ownGames: 10, explorerTotal: 1000 }),
+    ).toBe(true);
+  });
+  it("vrai pour un pat et pour roi+fou contre roi", () => {
+    expect(
+      branchEnds({
+        fen: "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1",
+        ply: 4,
+        ownGames: 9,
+        explorerTotal: null,
+      }),
+    ).toBe(true);
+    expect(
+      branchEnds({
+        fen: "8/8/4k3/8/8/3K4/3B4/8 w - - 0 1",
+        ply: 4,
+        ownGames: 9,
+        explorerTotal: null,
+      }),
+    ).toBe(true);
   });
   it("vrai hors phase d'ouverture", () => {
-    expect(branchEnds({ fen: START, ply: 21, ownGames: 10, explorerTotal: 1000 })).toBe(true);
+    expect(
+      branchEnds({ fen: START, ply: 21, ownGames: 10, explorerTotal: 1000 }),
+    ).toBe(true);
   });
   it("vrai si explorateur mince et peu de parties propres", () => {
-    expect(branchEnds({ fen: START, ply: 12, ownGames: 1, explorerTotal: 40 })).toBe(true);
+    expect(
+      branchEnds({ fen: START, ply: 12, ownGames: 1, explorerTotal: 40 }),
+    ).toBe(true);
   });
   it("faux sans explorateur et 1 partie propre en ouverture", () => {
-    expect(branchEnds({ fen: START, ply: 12, ownGames: 1, explorerTotal: null })).toBe(false);
+    expect(
+      branchEnds({ fen: START, ply: 12, ownGames: 1, explorerTotal: null }),
+    ).toBe(false);
   });
 });

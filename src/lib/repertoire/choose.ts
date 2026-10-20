@@ -45,16 +45,19 @@ export function playerCandidates(
 
 /**
  * Premier candidat (dans l'ordre) dont la perte est < NEAR_BEST_LOSS, sinon le meilleur coup.
- * `candidates` : par défaut les clés de `candidateEvals`. L'évaluation d'un candidat vient de sa ligne
- * MultiPV si elle existe, sinon de `candidateEvals` (position après le candidat, point de vue Blancs).
+ * `candidates` : coups candidats (UCI) dans l'ordre de priorité (voir `playerCandidates`). L'évaluation
+ * d'un candidat vient de sa ligne MultiPV si elle existe, sinon de `candidateEvals` (position après le
+ * candidat, point de vue Blancs) ; sans évaluation, le candidat est ignoré.
+ * `analysis.lines` ne doit pas être vide : les appelants testent `branchEnds` avant (lève une erreur sinon).
  */
 export function choosePlayerMove(
   analysis: PositionAnalysis,
   candidateEvals: Map<string, Evaluation>,
   color: Color,
-  candidates: string[] = [...candidateEvals.keys()],
+  candidates: string[],
 ): { uci: string; fromBook: boolean } {
   const best = analysis.lines[0];
+  if (!best) throw new Error("choosePlayerMove : aucune ligne d'analyse (position terminale ?)");
   const bestUci = best.pvUci[0];
   const bestWin = moverWinPercent(best.evaluation, color);
 
@@ -65,7 +68,8 @@ export function choosePlayerMove(
     const loss = Math.max(0, bestWin - moverWinPercent(evaluation, color));
     if (loss < NEAR_BEST_LOSS) return { uci, fromBook: true };
   }
-  return { uci: bestUci, fromBook: candidates.includes(bestUci) };
+  // Le meilleur coup, s'il était candidat, a une perte nulle et est déjà retenu plus haut.
+  return { uci: bestUci, fromBook: false };
 }
 
 /** Candidats absents de la MultiPV : leur position d'arrivée doit être évaluée. */
@@ -74,6 +78,7 @@ export function candidatesNeedingEval(analysis: PositionAnalysis, candidates: st
   return candidates.filter((uci) => !known.has(uci));
 }
 
+/** `lossOfDefiningMove` et `playerWinAtRoot` sont tous deux du point de vue de Leonel. */
 export function lineKind(input: {
   lossOfDefiningMove: number;
   bookName: string | null;
