@@ -19,3 +19,9 @@ export const BACKFILL_BATCH = 300;
 export const EXPLORER_TTL_DAYS = 30;
 export const EXPLORER_FETCHES_PER_STEP = 8;
 export const PLAYER_CANDIDATES = 2;
+/** Étapes de construction consécutives sans analyse demandée avant d'arrêter la boucle du navigateur. */
+export const BUILD_STALL_STEPS = 5;
+/** Nombre de demandes d'une même analyse avant d'arrêter (une analyse incomplète n'est jamais enregistrée). */
+export const BUILD_REPEAT_NEEDS = 3;
+/** Délai avant la réponse automatique de l'adversaire pendant une récitation (ms). */
+export const RECITE_OPPONENT_DELAY_MS = 400;

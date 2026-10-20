@@ -42,7 +42,8 @@ export default async function TrainingPage({
   const group = axe && isThemeGroup(axe) ? axe : null;
   const difficulty = niveau && isDifficulty(niveau) ? niveau : null;
 
-  const [exercises, settings, analyzedCount] = await Promise.all([
+  const now = new Date();
+  const [exercises, settings, analyzedCount, dueBranches] = await Promise.all([
     loadExercises(supabase),
     getSettings(supabase),
     supabase
@@ -53,15 +54,34 @@ export default async function TrainingPage({
         if (error) throw new Error(`Lecture des parties impossible : ${error.message}`);
         return count ?? 0;
       }),
+    // Branches d'ouverture déjà étudiées dont la révision est due.
+    supabase
+      .from("opening_branches")
+      .select("id", { count: "exact", head: true })
+      .eq("archived", false)
+      .not("studied_at", "is", null)
+      .lte("due_at", now.toISOString())
+      .then(({ count, error }) => {
+        if (error) throw new Error(`Lecture des branches d'ouverture impossible : ${error.message}`);
+        return count ?? 0;
+      }),
   ]);
-  const now = new Date();
 
   const header = (
-    <PageHeader
-      title="Entraînement"
-      description="Des positions tirées de tes propres erreurs. Trouve le coup que tu n'as pas vu ; Stockfish juge ta réponse."
-      actions={exercises.length > 0 ? <GenerateExercisesButton variant="outline" /> : undefined}
-    />
+    <>
+      <PageHeader
+        title="Entraînement"
+        description="Des positions tirées de tes propres erreurs. Trouve le coup que tu n'as pas vu ; Stockfish juge ta réponse."
+        actions={exercises.length > 0 ? <GenerateExercisesButton variant="outline" /> : undefined}
+      />
+      {dueBranches > 0 ? (
+        <p className="-mt-4 mb-8 text-sm">
+          <Link href="/openings" className="font-medium text-primary underline underline-offset-4 hover:no-underline">
+            {dueBranches} branche{dueBranches > 1 ? "s" : ""} d&apos;ouverture à revoir
+          </Link>
+        </p>
+      ) : null}
+    </>
   );
 
   if (analyzedCount === 0) {
