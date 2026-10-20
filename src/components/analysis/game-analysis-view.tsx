@@ -173,8 +173,14 @@ export function GameAnalysisView({
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,36rem)_minmax(0,1fr)] lg:items-start">
-        <div className="space-y-3">
-          <div className="flex flex-col gap-2 lg:flex-row">
+        {/*
+          L'échiquier reste visible pendant la lecture des explications :
+          - grand écran : toute la colonne est collante, à une taille qui tient dans la hauteur de l'écran ;
+          - mobile : l'échiquier et la navigation restent épinglés sous l'en-tête, à environ 40 % de la hauteur.
+        */}
+        <div className="space-y-3 lg:sticky lg:top-6 lg:max-w-[calc(100dvh-14rem)] lg:self-start">
+          <div className="sticky top-14 z-20 -mx-4 space-y-2 bg-background/95 px-4 pt-2 pb-2 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:space-y-3 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+          <div className="mx-auto flex max-w-[min(100%,40dvh)] flex-col gap-2 lg:max-w-none lg:flex-row">
             <EvalBar evaluation={evaluation} orientation={orientation} sideToMove={sideToMove} className={moves ? undefined : "opacity-40"} />
             <ChessBoard
               id={`game-${game.id}`}
@@ -185,7 +191,7 @@ export function GameAnalysisView({
             />
           </div>
 
-          <nav aria-label="Navigation dans la partie" className="flex flex-wrap items-center gap-1 lg:pl-9">
+          <nav aria-label="Navigation dans la partie" className="flex flex-wrap items-center justify-center gap-1 lg:justify-start lg:pl-9">
             <Button variant="outline" size="icon" aria-label="Premier coup" onClick={() => go(0)} disabled={ply === 0}>
               <ChevronFirst />
             </Button>
@@ -208,6 +214,7 @@ export function GameAnalysisView({
               </Button>
             ) : null}
           </nav>
+          </div>
 
           {moves ? (
             <div className="pt-2 lg:pl-9">
