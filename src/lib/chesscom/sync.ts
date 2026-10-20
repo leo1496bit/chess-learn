@@ -5,6 +5,7 @@ import type { Database, TablesInsert } from "@/lib/db/database.types";
 import { chesscomGameToRow, gameKey, type GameRow } from "@/lib/pgn/game";
 import type { ChesscomGame } from "./schemas";
 import { ChesscomError, type ChesscomClient } from "./client";
+import { indexGames } from "@/lib/repertoire/index-games";
 import { formatArchiveMonth, parseArchiveMonth, planArchiveFetch, type StoredArchive } from "./archives";
 
 type Supabase = SupabaseClient<Database>;
@@ -103,9 +104,15 @@ async function importGames(
     const { data, error } = await supabase
       .from("games")
       .upsert(chunk satisfies TablesInsert<"games">[], { onConflict: "user_id,chesscom_uuid", ignoreDuplicates: true })
-      .select("id");
+      .select("id, pgn");
     if (error) throw new Error(`Enregistrement des parties impossible : ${error.message}`);
     imported += data.length;
+    // Un échec d'indexation ne fait pas perdre les parties : positions_indexed reste false et le rattrapage s'en charge.
+    try {
+      await indexGames(supabase, data);
+    } catch (indexError) {
+      console.error("Indexation des ouvertures échouée après import", indexError);
+    }
     skipped += chunk.length - data.length; // insérées entre-temps (synchronisation concurrente)
   }
 
