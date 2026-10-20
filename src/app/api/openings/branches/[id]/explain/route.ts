@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/db/settings";
 import { AiError, createAnthropicClient } from "@/lib/ai/call";
 import type { ApiErrorBody } from "@/lib/ai/schema";
 import { buildBranchInput } from "@/lib/ai/branch/input";
-import { BRANCH_TIMEOUT_MS, generateBranchIdeas } from "@/lib/ai/branch/generate";
+import { BRANCH_MAX_RETRIES, BRANCH_TIMEOUT_MS, generateBranchIdeas } from "@/lib/ai/branch/generate";
 import type { BranchIdeasResponse } from "@/lib/ai/branch/schema";
 import { createSupabaseBranchIdeasStore } from "@/lib/ai/branch/store";
 import { DEFAULT_ENGINE_SETTINGS, type Color } from "@/lib/analysis/types";
@@ -97,7 +97,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       branchLength: branch.path_uci.length,
       settings,
       store: createSupabaseBranchIdeasStore(supabase),
-      client: createAnthropicClient(BRANCH_TIMEOUT_MS),
+      client: createAnthropicClient(BRANCH_TIMEOUT_MS, { maxRetries: BRANCH_MAX_RETRIES }),
       force: body.data?.force,
     });
     const response: BranchIdeasResponse = { ideas: result.ideas, verified: result.verified, cached: result.cached };

@@ -7,10 +7,17 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Chess } from "chess.js";
 import { playUci } from "@/lib/analysis/lines";
 import type { PositionAnalysis } from "@/lib/analysis/types";
-import type { MessagesClient } from "../call";
+import { createAnthropicClient, type MessagesClient } from "../call";
 import type { UsageSummary } from "../limits";
 import type { UsageRecord } from "../store";
-import { generateBranchIdeas, type BranchIdeasStore, type StoredBranchIdeas } from "./generate";
+import {
+  BRANCH_MAX_RETRIES,
+  BRANCH_RETRY_DEADLINE_MS,
+  BRANCH_TIMEOUT_MS,
+  generateBranchIdeas,
+  type BranchIdeasStore,
+  type StoredBranchIdeas,
+} from "./generate";
 import { buildBranchInput, type BranchInfo, type BranchLineInfo } from "./input";
 import { BRANCH_PROMPT_VERSION, BRANCH_SYSTEM_PROMPT } from "./prompt";
 import type { BranchIdeas } from "./schema";
@@ -266,6 +273,77 @@ describe("generateBranchIdeas", () => {
     expect(create).toHaveBeenCalledTimes(2);
     expect(saved).toEqual([]);
     expect(result).toMatchObject({ ideas: GOOD, verified: true, cached: true });
+  });
+
+  it("plus de BRANCH_RETRY_DEADLINE_MS écoulées : pas de nouvelle tentative, première réponse non vérifiée", async () => {
+    const bad = { ...GOOD, plan: "Joue Qh5 tout de suite." };
+    let clock = 0;
+    const { store, usage, saved } = fakeStore();
+    const { client: c, create } = client(reply(bad), reply(GOOD));
+    create.mockImplementationOnce(async () => {
+      clock += BRANCH_RETRY_DEADLINE_MS + 1; // première réponse lente
+      return reply(bad);
+    });
+    const result = await generateBranchIdeas({
+      branchId: "b", input, branchLength: 4, settings: SETTINGS, store, client: c, clock: () => clock,
+    });
+    expect(result).toMatchObject({ verified: false, cached: false });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(usage.map((u) => u.status)).toEqual(["unverified"]);
+    expect(saved).toEqual([{ verified: false, ideas: bad }]);
+  });
+
+  it("délai dépassé en régénération forcée : ne remplace pas la ligne vérifiée", async () => {
+    const bad = { ...GOOD, plan: "Joue Qh5 tout de suite." };
+    let clock = 0;
+    const { store, saved } = fakeStore({ ideas: GOOD, verified: true, createdAt: "x" });
+    const { client: c, create } = client();
+    create.mockImplementationOnce(async () => {
+      clock += BRANCH_RETRY_DEADLINE_MS + 1;
+      return reply(bad);
+    });
+    const result = await generateBranchIdeas({
+      branchId: "b", input, branchLength: 4, settings: SETTINGS, store, client: c, force: true, clock: () => clock,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saved).toEqual([]);
+    expect(result).toMatchObject({ ideas: GOOD, verified: true, cached: true });
+  });
+
+  it("la nouvelle tentative échoue (erreur SDK) : garde et enregistre la première réponse payée", async () => {
+    const bad = { ...GOOD, plan: "Joue Qh5 tout de suite." };
+    const { store, usage, saved } = fakeStore();
+    const { client: c, create } = client(reply(bad));
+    create.mockImplementationOnce(async () => reply(bad));
+    create.mockImplementationOnce(async () => {
+      throw new Anthropic.APIConnectionTimeoutError();
+    });
+    const result = await run(store, c);
+    expect(result).toMatchObject({ verified: false, cached: false, ideas: bad });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(usage.map((u) => u.status)).toEqual(["unverified", "error"]);
+    expect(saved).toEqual([{ verified: false, ideas: bad }]);
+  });
+
+  it("la nouvelle tentative échoue sans première réponse exploitable : l'erreur remonte", async () => {
+    const { store, saved } = fakeStore();
+    const { client: c, create } = client();
+    create.mockImplementationOnce(async () => reply({ nope: true }));
+    create.mockImplementationOnce(async () => {
+      throw new Anthropic.APIConnectionTimeoutError();
+    });
+    await expect(run(store, c)).rejects.toMatchObject({ status: 503, code: "upstream" });
+    expect(saved).toEqual([]);
+  });
+
+  it("client de la route : délai d'environ 25 s par appel, sans nouvel essai du SDK (limite de 60 s)", () => {
+    expect(BRANCH_TIMEOUT_MS).toBeLessThanOrEqual(25_000);
+    expect(BRANCH_MAX_RETRIES).toBeLessThanOrEqual(1);
+    const sdk = createAnthropicClient(BRANCH_TIMEOUT_MS, { maxRetries: BRANCH_MAX_RETRIES });
+    expect(sdk.timeout).toBe(BRANCH_TIMEOUT_MS);
+    expect(sdk.maxRetries).toBe(BRANCH_MAX_RETRIES);
+    // Les autres appelants gardent leurs valeurs par défaut.
+    expect(createAnthropicClient().maxRetries).toBe(2);
   });
 
   it("est versionné", () => {

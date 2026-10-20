@@ -9,7 +9,11 @@ import { BRANCH_MAX_TOKENS, BRANCH_SYSTEM_PROMPT, buildBranchRetryReminder } fro
 import { BranchIdeasSchema, type BranchIdeas } from "./schema";
 import { verifyBranchIdeas, type BranchVerification } from "./verify";
 
-export const BRANCH_TIMEOUT_MS = 60_000;
+// Limite de la route : 60 s (Vercel). Deux appels de 25 s au plus, sans nouvel essai du SDK, tiennent
+// dans ce délai ; la nouvelle tentative de vérification est sautée passé BRANCH_RETRY_DEADLINE_MS.
+export const BRANCH_TIMEOUT_MS = 25_000;
+export const BRANCH_MAX_RETRIES = 0;
+export const BRANCH_RETRY_DEADLINE_MS = 30_000;
 
 const outputFormat = zodOutputFormat(BranchIdeasSchema);
 
@@ -34,6 +38,8 @@ export type GenerateBranchIdeasInput = {
   /** Régénérer même si des idées vérifiées existent. */
   force?: boolean;
   now?: Date;
+  /** Horloge (ms) pour le délai de la nouvelle tentative ; `Date.now` par défaut. */
+  clock?: () => number;
 };
 
 export type GenerateBranchIdeasResult = StoredBranchIdeas & { cached: boolean };
@@ -42,6 +48,8 @@ export type GenerateBranchIdeasResult = StoredBranchIdeas & { cached: boolean };
 export async function generateBranchIdeas(params: GenerateBranchIdeasInput): Promise<GenerateBranchIdeasResult> {
   const { branchId, input, branchLength, settings, store, client } = params;
   const now = params.now ?? new Date();
+  const clock = params.clock ?? Date.now;
+  const startedAt = clock();
   const verify = (ideas: BranchIdeas): BranchVerification =>
     verifyBranchIdeas(ideas, input.allowedMoves, input.protectedPhrases, branchLength);
 
@@ -103,12 +111,21 @@ export async function generateBranchIdeas(params: GenerateBranchIdeasInput): Pro
   let verified = check?.valid ?? false;
 
   if (!verified) {
-    // Une seule nouvelle tentative ; si la limite vient d'être atteinte, on garde la première réponse.
-    if (ideas === null) ensureAllowed();
-    if (ideas === null || checkLimits(settings, { callsToday, costMonth }).allowed) {
+    // Une seule nouvelle tentative ; si la limite vient d'être atteinte ou si le temps manque (limite de
+    // 60 s de la route), on garde la première réponse, non vérifiée.
+    const late = clock() - startedAt > BRANCH_RETRY_DEADLINE_MS;
+    // Sans première réponse exploitable et sans temps pour une autre : erreur « invalid » plus bas.
+    if (ideas === null && !late) ensureAllowed();
+    if (!late && (ideas === null || checkLimits(settings, { callsToday, costMonth }).allowed)) {
       const reminder = buildBranchRetryReminder(check?.invalidMoves ?? [], check?.invalidIndexes ?? [], check?.missingIndexes ?? []);
-      const second = await attempt(input.text + "\n" + reminder);
-      if (second.kind === "parsed") {
+      let second: AttemptResult<BranchIdeas> | null = null;
+      try {
+        second = await attempt(input.text + "\n" + reminder);
+      } catch (error) {
+        // La première réponse a été payée : elle est gardée (non vérifiée) plutôt qu'une erreur 502.
+        if (ideas === null) throw error;
+      }
+      if (second?.kind === "parsed") {
         const secondCheck = verify(second.value);
         if (secondCheck.valid || ideas === null) {
           ideas = second.value;
