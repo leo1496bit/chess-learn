@@ -255,7 +255,9 @@ export function buildTree(root: TreeRoot, deps: TreeDeps, multipv: number): Tree
     complete: needs.size === 0 && needsReplies.size === 0,
     needs: [...needs.values()],
     needsReplies: [...needsReplies],
-    branches: branches.sort((a, b) => compareOrder(a.order, b.order)).map(({ order: _order, ...branch }) => branch),
+    branches: branches
+      .sort((a, b) => compareOrder(a.order, b.order))
+      .map(({ pathUci, pathSan, endFen, ownGames, explorerGames }) => ({ pathUci, pathSan, endFen, ownGames, explorerGames })),
     kind,
   };
 }
