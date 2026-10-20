@@ -9,7 +9,7 @@ import { SyncButton } from "@/components/games/sync-button";
 import { formatRelative } from "@/components/games/format";
 import { requireUser } from "@/lib/db/server";
 import { getSettings } from "@/lib/db/settings";
-import { hasActiveFilters, parseGameFilters } from "./filters";
+import { parseGameFilters } from "./filters";
 import { getLibraryState, listGames } from "./queries";
 
 export const metadata: Metadata = { title: "Mes parties" };
@@ -17,7 +17,6 @@ export const metadata: Metadata = { title: "Mes parties" };
 export default async function GamesPage({ searchParams }: PageProps<"/games">) {
   const { supabase } = await requireUser();
   const filters = parseGameFilters(await searchParams);
-  const active = hasActiveFilters(filters);
 
   const [settings, library, { games, total }] = await Promise.all([
     getSettings(supabase),
@@ -43,7 +42,9 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
         <EmptyLibrary username={settings.chesscomUsername} />
       ) : (
         <div className="space-y-4">
-          <GamesFilters filters={filters} active={active} />
+          <GamesFilters filters={filters} />
+          {/* Pendant la mise à jour des filtres, les résultats affichés sont estompés. */}
+          <div className="space-y-4 transition-opacity [[data-pending]+&]:opacity-50">
           {games.length === 0 ? (
             <NoMatch />
           ) : (
@@ -55,6 +56,7 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
               <GamesPagination filters={filters} total={total} />
             </>
           )}
+          </div>
         </div>
       )}
     </>
