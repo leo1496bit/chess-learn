@@ -3,6 +3,7 @@
 import { ClassificationBadge, MissedWinBadge } from "@/components/chess/classification-badge";
 import { ARROW_COLORS } from "@/components/chess/chess-board";
 import { ExplanationPanel } from "@/components/ai/explanation-panel";
+import type { MoveLink } from "@/lib/ai/move-links";
 import { isErrorClassification } from "@/lib/analysis/classify";
 import { PHASE_LABELS, THEME_LABELS, formatSanLine, moveNumberLabel, themeKind } from "@/lib/analysis/labels";
 import { formatEvaluation } from "@/lib/analysis/win";
@@ -45,7 +46,19 @@ function TheoryNote({ theory }: { theory: MoveTheory | null }) {
   );
 }
 
-export function MoveDetails({ move, gameId, theory }: { move: MoveAnalysis | null; gameId: string; theory: MoveTheory | null }) {
+export function MoveDetails({
+  move,
+  gameId,
+  theory,
+  onPreviewMove,
+  previewKey,
+}: {
+  move: MoveAnalysis | null;
+  gameId: string;
+  theory: MoveTheory | null;
+  onPreviewMove?: (link: MoveLink) => void;
+  previewKey?: string | null;
+}) {
   if (!move) {
     return (
       <div className="space-y-1">
@@ -159,7 +172,7 @@ export function MoveDetails({ move, gameId, theory }: { move: MoveAnalysis | nul
       ) : null}
 
       <div className="border-t pt-5">
-        <ExplanationPanel gameId={gameId} move={move} />
+        <ExplanationPanel gameId={gameId} move={move} onPreviewMove={onPreviewMove} previewKey={previewKey} />
       </div>
     </div>
   );

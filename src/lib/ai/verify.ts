@@ -47,16 +47,32 @@ export function allowedMovesFor(move: Pick<MoveAnalysis, "san" | "bestSan" | "ca
   return allowed;
 }
 
-/** Coups SAN cités dans un texte libre (cases isolées en contexte « la case e4 » exclues). */
-export function extractSanTokens(text: string): string[] {
-  const tokens: string[] = [];
+/** Morceau de texte : texte libre, ou coup SAN cité (`san` = forme d'origine). */
+export type TextSegment = { text: string; san?: string };
+
+/**
+ * Découpe un texte libre en morceaux, en isolant les coups SAN cités (cases isolées en contexte
+ * « la case e4 » exclues). Sert à la vérification et à l'affichage des coups cliquables : les
+ * deux reconnaissent exactement les mêmes coups.
+ */
+export function segmentSan(text: string): TextSegment[] {
+  const segments: TextSegment[] = [];
+  let last = 0;
   for (const match of text.matchAll(SAN_TOKEN)) {
     const token = match[0];
     const index = match.index ?? 0;
     if (BARE_SQUARE.test(token) && isSquareMention(text, index)) continue;
-    tokens.push(token);
+    if (index > last) segments.push({ text: text.slice(last, index) });
+    segments.push({ text: token, san: token });
+    last = index + token.length;
   }
-  return tokens;
+  if (last < text.length) segments.push({ text: text.slice(last) });
+  return segments;
+}
+
+/** Coups SAN cités dans un texte libre (cases isolées en contexte « la case e4 » exclues). */
+export function extractSanTokens(text: string): string[] {
+  return segmentSan(text).flatMap((segment) => (segment.san ? [segment.san] : []));
 }
 
 function isSquareMention(text: string, index: number): boolean {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,6 +8,8 @@ import { ClassificationBadge, MissedWinBadge } from "@/components/chess/classifi
 import { cn } from "@/lib/utils";
 import type { MoveAnalysis } from "@/lib/analysis/types";
 import { isFlaggedMove } from "@/lib/ai/eligibility";
+import { buildMoveLinks, type MoveLink } from "@/lib/ai/move-links";
+import { normalizeSan, segmentSan } from "@/lib/ai/verify";
 import {
   CONFIDENCE_LABELS,
   ERROR_TYPE_LABELS,
@@ -120,7 +122,22 @@ function sectionsFor(flagged: boolean, byPlayer: boolean): { key: SectionKey; ti
   ];
 }
 
-export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveAnalysis }) {
+/** Clé d'un aperçu de coup (position + coup), pour marquer le coup affiché. */
+export const moveLinkKey = (link: Pick<MoveLink, "fen" | "uci">) => `${link.fen}|${link.uci}`;
+
+export function ExplanationPanel({
+  gameId,
+  move,
+  onPreviewMove,
+  previewKey,
+}: {
+  gameId: string;
+  move: MoveAnalysis;
+  /** Affiche un coup cité sur l'échiquier (position avant le coup + flèche). */
+  onPreviewMove?: (link: MoveLink) => void;
+  /** Coup actuellement affiché en aperçu (voir moveLinkKey). */
+  previewKey?: string | null;
+}) {
   const key = `${gameId}:${move.ply}`;
   // L'état est rattaché au coup affiché : changer de coup repart de « chargement du cache ».
   const [entry, setEntry] = useState<{ key: string; state: State } | null>(null);
@@ -226,14 +243,62 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
         </div>
       ) : null}
 
-      {state.kind === "ready" ? <ExplanationBody data={state.data} move={move} /> : null}
-      {state.kind === "error" && state.previous ? <ExplanationBody data={state.previous} move={move} /> : null}
+      {state.kind === "ready" ? <ExplanationBody data={state.data} move={move} onPreviewMove={onPreviewMove} previewKey={previewKey} /> : null}
+      {state.kind === "error" && state.previous ? (
+        <ExplanationBody data={state.previous} move={move} onPreviewMove={onPreviewMove} previewKey={previewKey} />
+      ) : null}
     </section>
   );
 }
 
-function ExplanationBody({ data, move }: { data: Loaded; move: MoveAnalysis }) {
+/** Texte d'une rubrique : les coups cités qui figurent dans les variantes deviennent des boutons. */
+function LinkedText({
+  text,
+  links,
+  onPreviewMove,
+  previewKey,
+}: {
+  text: string;
+  links: Map<string, MoveLink>;
+  onPreviewMove?: (link: MoveLink) => void;
+  previewKey?: string | null;
+}): ReactNode {
+  if (!onPreviewMove) return text;
+  return segmentSan(text).map((segment, i) => {
+    const link = segment.san ? links.get(normalizeSan(segment.san)) : undefined;
+    if (!link) return segment.text;
+    const active = previewKey === moveLinkKey(link);
+    return (
+      <button
+        key={i}
+        type="button"
+        onClick={() => onPreviewMove(link)}
+        aria-pressed={active}
+        title="Voir ce coup sur l'échiquier"
+        className={cn(
+          "tabular rounded px-0.5 font-semibold text-primary underline decoration-dotted decoration-primary/50 underline-offset-4 hover:bg-accent",
+          active && "bg-primary text-primary-foreground no-underline hover:bg-primary",
+        )}
+      >
+        {segment.text}
+      </button>
+    );
+  });
+}
+
+function ExplanationBody({
+  data,
+  move,
+  onPreviewMove,
+  previewKey,
+}: {
+  data: Loaded;
+  move: MoveAnalysis;
+  onPreviewMove?: (link: MoveLink) => void;
+  previewKey?: string | null;
+}) {
   const { explanation, verified, cached } = data;
+  const links = useMemo(() => buildMoveLinks(move), [move]);
   const flagged = isFlaggedMove(move);
   const bestSan = flagged ? move.bestSan : null;
   return (
@@ -260,7 +325,8 @@ function ExplanationBody({ data, move }: { data: Loaded; move: MoveAnalysis }) {
               {title}
               {key === "bestMove" && bestSan ? <span className="tabular ml-2 text-cls-best">{bestSan}</span> : null}
             </dt>
-            <dd className={cn("max-w-prose leading-relaxed", key === "lesson" && "font-medium")}>{explanation[key]}</dd>
+            <dd className={cn("max-w-prose leading-relaxed", key === "lesson" && "font-medium")}><LinkedText text={explanation[key]} links={links} onPreviewMove={onPreviewMove} previewKey={previewKey} />
+            </dd>
           </div>
         ))}
       </dl>

@@ -8,6 +8,8 @@ import { MoveList, type MoveListItem } from "@/components/chess/move-list";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GameReportPanel } from "@/components/ai/game-report-panel";
+import { moveLinkKey } from "@/components/ai/explanation-panel";
+import type { MoveLink } from "@/lib/ai/move-links";
 import { theoryForPly, type OpeningReport } from "@/lib/openings/identify";
 import { toast } from "sonner";
 import { isErrorClassification } from "@/lib/analysis/classify";
@@ -40,6 +42,22 @@ function arrowsFor(move: MoveAnalysis | undefined): BoardArrow[] {
   };
   if (!move.bestUci || move.bestUci === move.uci || move.classification === "best" || move.classification === "forced") return [played];
   return [played, { from: move.bestUci.slice(0, 2), to: move.bestUci.slice(2, 4), color: ARROW_COLORS.best }];
+}
+
+const PREVIEW_SOURCE: Record<MoveLink["source"], (link: MoveLink) => string> = {
+  played: () => "coup joué",
+  candidate: (link) => (link.rank === 1 ? "variante du meilleur coup" : `variante du candidat ${link.rank}`),
+  reply: () => "suite attendue après le coup joué",
+};
+
+/** « 3. Bb5 » ou « 3... a6 », d'après la position avant le coup. */
+function previewLabel(link: MoveLink): string {
+  const [, side, , , , fullmove] = link.fen.split(" ");
+  return `${fullmove ?? ""}${side === "b" ? "..." : "."} ${link.san}`;
+}
+
+function previewArrows(link: MoveLink): BoardArrow[] {
+  return [{ from: link.uci.slice(0, 2), to: link.uci.slice(2, 4), color: link.source === "reply" ? ARROW_COLORS.played : ARROW_COLORS.best }];
 }
 
 function theoryItem(opening: OpeningReport | null, ply: number): MoveListItem["theory"] {
@@ -81,6 +99,8 @@ export function GameAnalysisView({
   );
   const [ply, setPly] = useState(0);
   const [tab, setTab] = useState<"move" | "report">("move");
+  // Coup cité dans une explication, affiché sur l'échiquier à la place de la position de la partie.
+  const [preview, setPreview] = useState<MoveLink | null>(null);
   const [orientation, setOrientation] = useState<"white" | "black">(game.playerColor === "w" ? "white" : "black");
 
   const { state, start, cancel } = useGameAnalysis((result) => {
@@ -97,7 +117,13 @@ export function GameAnalysisView({
   const moves = analysis?.moves ?? null;
   const current = ply > 0 ? moves?.[ply - 1] : undefined;
 
-  const go = useCallback((target: number) => setPly(Math.max(0, Math.min(lastPly, target))), [lastPly]);
+  const go = useCallback(
+    (target: number) => {
+      setPreview(null);
+      setPly(Math.max(0, Math.min(lastPly, target)));
+    },
+    [lastPly],
+  );
   const nextError = useMemo(() => {
     if (!moves) return null;
     return moves.find((m) => m.ply > ply && m.isPlayerMove && isFlagged(m)) ?? moves.find((m) => m.isPlayerMove && isFlagged(m)) ?? null;
@@ -109,6 +135,7 @@ export function GameAnalysisView({
       if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
       const actions: Record<string, () => void> = {
+        Escape: () => setPreview(null),
         ArrowLeft: () => go(ply - 1),
         ArrowRight: () => go(ply + 1),
       };
@@ -184,10 +211,10 @@ export function GameAnalysisView({
             <EvalBar evaluation={evaluation} orientation={orientation} sideToMove={sideToMove} className={moves ? undefined : "opacity-40"} />
             <ChessBoard
               id={`game-${game.id}`}
-              fen={fens[ply]}
+              fen={preview?.fen ?? fens[ply]}
               orientation={orientation}
-              arrows={moves ? arrowsFor(current) : []}
-              highlightSquares={playedSquares}
+              arrows={preview ? previewArrows(preview) : moves ? arrowsFor(current) : []}
+              highlightSquares={preview ? undefined : playedSquares}
             />
           </div>
 
@@ -214,6 +241,20 @@ export function GameAnalysisView({
               </Button>
             ) : null}
           </nav>
+          {preview ? (
+            <p
+              role="status"
+              className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-md bg-accent px-3 py-2 text-sm lg:ml-9 lg:justify-start"
+            >
+              <span>
+                Aperçu : <span className="tabular font-semibold">{previewLabel(preview)}</span>
+                <span className="text-muted-foreground"> ({PREVIEW_SOURCE[preview.source](preview)})</span>
+              </span>
+              <button type="button" onClick={() => setPreview(null)} className="font-medium text-primary underline-offset-4 hover:underline">
+                Revenir à la partie
+              </button>
+            </p>
+          ) : null}
           </div>
 
           {moves ? (
@@ -231,7 +272,13 @@ export function GameAnalysisView({
           <TabsContent value="move" className="space-y-6">
             {moves ? (
               <div className="rounded-lg border bg-card p-4 sm:p-5">
-                <MoveDetails move={current ?? null} gameId={game.id} theory={opening && ply > 0 ? theoryForPly(opening, ply) : null} />
+                <MoveDetails
+                  move={current ?? null}
+                  gameId={game.id}
+                  theory={opening && ply > 0 ? theoryForPly(opening, ply) : null}
+                  onPreviewMove={setPreview}
+                  previewKey={preview ? moveLinkKey(preview) : null}
+                />
               </div>
             ) : null}
             <div className="rounded-lg border bg-card">
