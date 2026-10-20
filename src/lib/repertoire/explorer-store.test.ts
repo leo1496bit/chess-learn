@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EXPLORER_PARAMS } from "@/lib/lichess/explorer";
 import { EXPLORER_TTL_DAYS } from "./constants";
 import { getExplorer } from "./explorer-store";
@@ -8,7 +8,7 @@ const NOW = new Date("2026-10-20T12:00:00Z");
 const BODY = { white: 60, draws: 10, black: 30, moves: [{ uci: "g1f3", san: "Nf3", white: 30, draws: 5, black: 15 }] };
 const RESULT = { total: 100, moves: [{ uci: "g1f3", san: "Nf3", games: 50, share: 0.5 }] };
 
-function fakeSupabase(row: { data: unknown; fetched_at: string } | null) {
+function fakeSupabase(row: { data: unknown; fetched_at: string } | null, errs: { read?: string; write?: string } = {}) {
   const upserts: unknown[] = [];
   const selects: Record<string, string>[] = [];
   const client = {
@@ -24,14 +24,14 @@ function fakeSupabase(row: { data: unknown; fetched_at: string } | null) {
             },
             async maybeSingle() {
               selects.push(filters);
-              return { data: row, error: null };
+              return { data: row, error: errs.read ? { message: errs.read } : null };
             },
           };
           return q;
         },
         async upsert(v: unknown) {
           upserts.push(v);
-          return { error: null };
+          return { error: errs.write ? { message: errs.write } : null };
         },
       };
     },
@@ -93,13 +93,35 @@ describe("getExplorer", () => {
     expect(db.upserts).toEqual([]);
   });
 
-  it("401 et 5xx : unavailable, rien d'écrit", async () => {
-    for (const status of [401, 503]) {
+  it("401 : unauthorized, 5xx : unavailable, rien d'écrit", async () => {
+    for (const [status, expected] of [[401, "unauthorized"], [503, "unavailable"]] as const) {
       const db = fakeSupabase(null);
       const r = await getExplorer(db.client, "e", { token: "t", budget: { left: 5 }, now: NOW, fetchImpl: fakeFetch(status).impl });
-      expect(r).toBe("unavailable");
+      expect(r).toBe(expected);
       expect(db.upserts).toEqual([]);
     }
+  });
+
+  it("cache malformé : traité comme absent, rechargé", async () => {
+    for (const bad of [{ total: 1 }, { total: 1, moves: [{ uci: "a" }] }, "x", null]) {
+      const db = fakeSupabase({ data: bad, fetched_at: daysAgo(1) });
+      const f = fakeFetch(200);
+      const r = await getExplorer(db.client, "e", { token: "t", budget: { left: 1 }, now: NOW, fetchImpl: f.impl });
+      expect(r).toEqual(RESULT);
+      expect(f.count()).toBe(1);
+    }
+  });
+
+  it("échec de lecture ou d'écriture du cache : avertit sans jeton, continue", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const db = fakeSupabase(null, { read: "lecture KO", write: "écriture KO" });
+    const r = await getExplorer(db.client, "e", { token: "SECRET", budget: { left: 1 }, now: NOW, fetchImpl: fakeFetch(200).impl });
+    expect(r).toEqual(RESULT);
+    const msgs = warn.mock.calls.flat().join(" ");
+    expect(msgs).toContain("lecture KO");
+    expect(msgs).toContain("écriture KO");
+    expect(msgs).not.toContain("SECRET");
+    warn.mockRestore();
   });
 
   it("erreur réseau : unavailable", async () => {

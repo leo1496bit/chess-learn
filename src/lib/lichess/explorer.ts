@@ -46,10 +46,35 @@ export async function fetchExplorer(
   } catch {
     throw new ExplorerError("unavailable", "Explorateur Lichess : réponse illisible");
   }
+  if (!body || !Array.isArray(body.moves)) {
+    throw new ExplorerError("unavailable", "Explorateur Lichess : réponse inattendue");
+  }
   const total = (body.white ?? 0) + (body.draws ?? 0) + (body.black ?? 0);
-  const moves = (body.moves ?? []).map((m) => {
+  const moves: ExplorerMove[] = [];
+  for (const m of body.moves) {
+    if (!m || typeof m.uci !== "string" || typeof m.san !== "string") continue;
     const games = (m.white ?? 0) + (m.draws ?? 0) + (m.black ?? 0);
-    return { uci: m.uci, san: m.san, games, share: total > 0 ? games / total : 0 };
-  });
+    moves.push({ uci: m.uci, san: m.san, games, share: total > 0 ? games / total : 0 });
+  }
   return { total, moves };
+}
+
+/** Vérifie la forme d'un résultat (ligne de cache) avant de s'en servir. */
+export function isExplorerResult(v: unknown): v is ExplorerResult {
+  if (!v || typeof v !== "object") return false;
+  const r = v as { total?: unknown; moves?: unknown };
+  return (
+    typeof r.total === "number" &&
+    Array.isArray(r.moves) &&
+    r.moves.every((m) => {
+      const x = m as Record<string, unknown> | null;
+      return (
+        !!x &&
+        typeof x.uci === "string" &&
+        typeof x.san === "string" &&
+        typeof x.games === "number" &&
+        typeof x.share === "number"
+      );
+    })
+  );
 }

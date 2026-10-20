@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXPLORER_PARAMS, ExplorerError, fetchExplorer } from "./explorer";
+import { EXPLORER_PARAMS, ExplorerError, fetchExplorer, isExplorerResult } from "./explorer";
 
 const BODY = {
   white: 60,
@@ -56,5 +56,21 @@ describe("fetchExplorer", () => {
     const err = await fetchExplorer("x", "SECRET", impl).catch((e) => e);
     expect(err.code).toBe("unavailable");
     expect(err.message).not.toContain("SECRET");
+  });
+
+  it("ignore les coups sans uci/san, rejette un corps sans moves", async () => {
+    const ok = fakeFetch(200, { white: 1, draws: 0, black: 0, moves: [{ san: "x", white: 1 }, { uci: "e2e4", san: "e4", white: 1, draws: 0, black: 0 }] });
+    expect((await fetchExplorer("x", "t", ok.impl)).moves.map((m) => m.uci)).toEqual(["e2e4"]);
+    const err = await fetchExplorer("x", "t", fakeFetch(200, { white: 1 }).impl).catch((e) => e);
+    expect(err.code).toBe("unavailable");
+  });
+});
+
+describe("isExplorerResult", () => {
+  it("accepte une forme valide, refuse le reste", () => {
+    expect(isExplorerResult({ total: 0, moves: [] })).toBe(true);
+    expect(isExplorerResult({ total: "1", moves: [] })).toBe(false);
+    expect(isExplorerResult({ total: 1, moves: [{ uci: "a", san: "b", games: 1 }] })).toBe(false);
+    expect(isExplorerResult(null)).toBe(false);
   });
 });
