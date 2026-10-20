@@ -13,7 +13,9 @@ function errorResponse(status: number, error: string) {
 
 /**
  * Une étape de construction de l'arbre : renvoie les analyses que le navigateur doit encore calculer
- * (et enregistrer dans `position_analyses`) avant de rappeler cette route.
+ * (et enregistrer dans `position_analyses`) avant de rappeler cette route. Le navigateur analyse à la
+ * `depth` renvoyée ici (celle de la ligne en base, qu'un `/rebuild` a pu changer), jamais à celle d'une
+ * copie locale de la ligne. Une étape dure au plus ~45 s ; `status: "building"` : rappeler la route.
  */
 export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await getAuthorizedUser();

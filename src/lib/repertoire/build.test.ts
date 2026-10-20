@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { Chess } from "chess.js";
 import type { PositionAnalysis } from "@/lib/analysis/types";
 import { toEpd, type OpeningBook } from "@/lib/openings/identify";
-import { buildStep, createLine, CUSTOM_LINE_NAME, LINE_START_ERROR, rebuildLine } from "./build";
+import {
+  BUILD_EXPLORER_CUTOFF_MS,
+  BUILD_STEP_BUDGET_MS,
+  buildStep,
+  createLine,
+  CUSTOM_LINE_NAME,
+  LINE_START_ERROR,
+  rebuildLine,
+} from "./build";
 import { EXPLORER_FETCHES_PER_STEP } from "./constants";
 import type { BranchMerge, ExistingBranch } from "./merge";
 import type { ExplorerLookup, LinePatch, LineRecord, LineStore, NewLine, RootStats } from "./build";
@@ -66,9 +74,10 @@ function fakeStore(input: {
   lines?: Map<string, string>;
   branches?: ExistingBranch[];
   record?: LineRecord;
+  replies?: Map<string, { uci: string; san: string; games: number }[]>;
 }) {
   const analyses = input.analyses ?? toyAnalyses();
-  const replies = new Map([[toEpd(AFTER_NF3), [{ uci: "b8c6", san: "Nc6", games: 5 }]]]);
+  const replies = input.replies ?? new Map([[toEpd(AFTER_NF3), [{ uci: "b8c6", san: "Nc6", games: 5 }]]]);
   const calls = {
     loads: [] as { fens: string[]; depth: number; multipv: number }[],
     replyStats: [] as string[],
@@ -196,6 +205,15 @@ describe("createLine", () => {
     expect(calls.inserted[0]).toMatchObject({ playerColor: "w", prefixUci: PREFIX, games: 7, wins: 3, draws: 1, losses: 3 });
   });
 
+  it("renvoie 404 pour une suggestion dont le chemin est vide (position initiale)", async () => {
+    const epd = toEpd(new Chess().fen());
+    const { store } = fakeStore({
+      rootStats: new Map([[epd, { games: 9, wins: 3, draws: 3, losses: 3, topPath: "" }]]),
+    });
+    const result = await createLine(store, { source: "suggestion", epd }, DEPS);
+    expect(result).toEqual({ ok: false, status: 404, error: "Position introuvable dans tes parties" });
+  });
+
   it("renvoie 404 pour une suggestion jamais jouée", async () => {
     const { store } = fakeStore({});
     const result = await createLine(store, { source: "suggestion", epd: toEpd(ROOT_FEN) }, DEPS);
@@ -207,7 +225,14 @@ describe("buildStep", () => {
   it("termine l'arbre et écrit les branches quand toutes les données existent", async () => {
     const { store, calls } = fakeStore({ branches: [{ id: "gone", pathUci: ["d2d4"], archived: false }] });
     const result = await buildStep(store, { book: {}, now: NOW }, line());
-    expect(result).toEqual({ status: "ready", needs: [], progress: { branches: 1, pending: 0 }, explorerUnavailable: false });
+    expect(result).toEqual({
+      status: "ready",
+      needs: [],
+      progress: { branches: 1, pending: 0 },
+      explorerUnavailable: false,
+      depth: 16,
+      multipv: 3,
+    });
     expect(calls.merges).toHaveLength(1);
     expect(calls.merges[0].archive).toEqual(["gone"]);
     expect(calls.merges[0].insert).toEqual([
@@ -272,9 +297,94 @@ describe("buildStep", () => {
       ],
     });
     const result = await buildStep(store, { book: {}, now: NOW }, line({ status: "ready" }));
-    expect(result).toEqual({ status: "ready", needs: [], progress: { branches: 1, pending: 0 }, explorerUnavailable: false });
+    expect(result).toEqual({
+      status: "ready",
+      needs: [],
+      progress: { branches: 1, pending: 0 },
+      explorerUnavailable: false,
+      depth: 16,
+      multipv: 3,
+    });
     expect(calls.loads).toEqual([]);
     expect(calls.merges).toEqual([]);
+  });
+});
+
+/** Espagnole fermée, 21 demi-coups : la phase d'ouverture se termine au demi-coup 21. */
+const DEEP_GAME = (
+  "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7 f1e1 b7b5 a4b3 d7d6 c2c3 e8g8 h2h3 c6a5 b3c2 c7c5 d2d4"
+).split(" ");
+
+/**
+ * Toutes les données d'une ligne profonde : chaque position mène au coup suivant de la partie. À chaque
+ * coup de Leonel, un coup alternatif du livre hors MultiPV (nettement moins bon) demande sa propre
+ * évaluation, comme en production : environ 1,5 assemblage par demi-coup.
+ */
+function deepData() {
+  const analyses = new Map<string, PositionAnalysis>();
+  const replies = new Map<string, { uci: string; san: string; games: number }[]>();
+  const book: OpeningBook = {};
+  const chess = new Chess();
+  for (let i = 0; i <= DEEP_GAME.length; i++) {
+    const fen = chess.fen();
+    const next = DEEP_GAME[i] ?? chess.moves({ verbose: true })[0].lan;
+    for (const multipv of [1, 3]) analyses.set(`${fen}|${multipv}`, analysis(fen, next, multipv));
+    if (i % 2 === 0 && i < DEEP_GAME.length) {
+      const alt = chess.moves({ verbose: true }).find((m) => m.lan !== next)!;
+      book[toEpd(alt.after)] = ["A00", "Alternative", 1];
+      analyses.set(`${alt.after}|1`, analysis(alt.after, "a7a6", 1, -300));
+    }
+    if (i < DEEP_GAME.length) {
+      const move = chess.move({ from: next.slice(0, 2), to: next.slice(2, 4) });
+      if (i % 2 === 1) replies.set(toEpd(fen), [{ uci: next, san: move.san, games: 5 }]);
+    }
+  }
+  return { analyses, replies, book };
+}
+
+describe("buildStep : longueur et délai", () => {
+  const deepLine = () => line({ rootFen: fenAfter(PREFIX), prefixUci: PREFIX });
+
+  it("termine en une seule étape une ligne profonde dont toutes les données sont en cache", async () => {
+    const data = deepData();
+    const { store, calls } = fakeStore(data);
+    const result = await buildStep(store, { book: data.book, now: NOW }, deepLine());
+    expect(result.status).toBe("ready");
+    expect(calls.merges[0].insert).toHaveLength(1);
+    expect(calls.merges[0].insert[0].pathUci).toEqual(DEEP_GAME.slice(2));
+  });
+
+  it("ne lance plus d'appel à l'explorateur après BUILD_EXPLORER_CUTOFF_MS", async () => {
+    let clock = 0;
+    const { store, calls } = fakeStore({
+      ...deepData(),
+      explorer: () => {
+        clock += BUILD_EXPLORER_CUTOFF_MS; // appel lent (délai de l'API)
+        return "unavailable";
+      },
+    });
+    const result = await buildStep(store, { book: {}, now: NOW, clock: () => clock }, deepLine());
+    expect(calls.explorer).toHaveLength(1);
+    expect(result.status).toBe("building");
+    expect(calls.merges).toEqual([]);
+  });
+
+  it("s'arrête après BUILD_STEP_BUDGET_MS et reprend à l'étape suivante", async () => {
+    let clock = 0;
+    const data = deepData();
+    const { store, calls } = fakeStore({
+      ...data,
+      explorer: () => "unavailable",
+    });
+    const slow = { ...store, loadAnalyses: async (fens: string[], depth: number, multipv: number) => {
+      clock += BUILD_STEP_BUDGET_MS;
+      return store.loadAnalyses(fens, depth, multipv);
+    } };
+    const first = await buildStep(slow, { book: {}, now: NOW, clock: () => clock }, deepLine());
+    expect(first.status).toBe("building");
+    expect(calls.loads).toHaveLength(1);
+    const second = await buildStep(store, { book: {}, now: NOW }, deepLine());
+    expect(second.status).toBe("ready");
   });
 });
 

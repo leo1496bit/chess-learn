@@ -6,7 +6,7 @@ import { playUci } from "@/lib/analysis/lines";
 import type { Color, PositionAnalysis } from "@/lib/analysis/types";
 import type { ExplorerResult } from "@/lib/lichess/explorer";
 import { identifyOpening, toEpd, type OpeningBook } from "@/lib/openings/identify";
-import { EXPLORER_FETCHES_PER_STEP } from "./constants";
+import { EXPLORER_FETCHES_PER_STEP, MAX_PLY } from "./constants";
 import { mergeBranches, type BranchMerge, type ExistingBranch } from "./merge";
 import { buildTree, type AnalysisNeed, type TreeDeps, type TreeResult } from "./tree";
 
@@ -14,8 +14,16 @@ export const CUSTOM_LINE_NAME = "Ligne personnalisée";
 export const LINE_START_ERROR = "La ligne doit commencer après un coup adverse";
 const ILLEGAL_MOVE_ERROR = "La suite de coups contient un coup illégal.";
 const UNKNOWN_POSITION_ERROR = "Position introuvable dans tes parties";
-/** Garde-fou : nombre maximal d'assemblages de l'arbre par étape. */
-const MAX_ITERATIONS = 20;
+/**
+ * Garde-fou : nombre maximal d'assemblages de l'arbre par étape. Un demi-coup en demande jusqu'à 3
+ * (analyse et explorateur, candidats hors MultiPV, réponses adverses) ; la boucle s'arrête d'elle-même
+ * dès qu'un assemblage n'apporte rien de nouveau.
+ */
+const MAX_ITERATIONS = 3 * MAX_PLY;
+/** Plus aucun nouvel appel à l'explorateur (délai de 10 s par appel) au-delà de cette durée d'étape. */
+export const BUILD_EXPLORER_CUTOFF_MS = 30_000;
+/** Durée au-delà de laquelle l'étape s'arrête (limite Vercel de 60 s) ; la suivante reprend via les caches. */
+export const BUILD_STEP_BUDGET_MS = 45_000;
 
 export type LineStatus = "building" | "ready";
 
@@ -113,8 +121,9 @@ export async function createLine(
   let stats: RootStats | null = null;
   if (body.source === "suggestion") {
     stats = await store.rootStats(body.epd);
-    if (stats.games === 0 || stats.topPath === null) return { ok: false, status: 404, error: UNKNOWN_POSITION_ERROR };
-    prefixUci = stats.topPath.split(" ").filter(Boolean);
+    prefixUci = (stats.topPath ?? "").split(" ").filter(Boolean);
+    // Chemin vide : la position initiale, qui ne suit aucun coup adverse.
+    if (stats.games === 0 || prefixUci.length === 0) return { ok: false, status: 404, error: UNKNOWN_POSITION_ERROR };
   } else {
     prefixUci = body.uci;
   }
@@ -159,11 +168,18 @@ export async function createLine(
 
 // --- Construction ---------------------------------------------------------------------------
 
+/**
+ * Le navigateur doit analyser chaque `needs` à la profondeur `depth` de cette réponse (MultiPV indiqué
+ * par chaque besoin), pas à celle d'une copie locale de la ligne : une mise à jour (`/rebuild`) peut
+ * l'avoir changée. `multipv` est celui de la ligne (positions où Leonel joue).
+ */
 export type BuildStepResult = {
   status: LineStatus;
   needs: AnalysisNeed[];
   progress: { branches: number; pending: number };
   explorerUnavailable: boolean;
+  depth: number;
+  multipv: number;
 };
 
 /**
@@ -174,9 +190,13 @@ export type BuildStepResult = {
  */
 export async function buildStep(
   store: LineStore,
-  deps: { book: OpeningBook; now: Date },
+  deps: { book: OpeningBook; now: Date; clock?: () => number },
   line: LineRecord,
 ): Promise<BuildStepResult> {
+  const clock = deps.clock ?? Date.now;
+  const startedAt = clock();
+  const elapsed = () => clock() - startedAt;
+  const settings = { depth: line.depth, multipv: line.multipv };
   if (line.status === "ready") {
     const branches = await store.listBranches(line.id);
     return {
@@ -184,6 +204,7 @@ export async function buildStep(
       needs: [],
       progress: { branches: branches.filter((b) => !b.archived).length, pending: 0 },
       explorerUnavailable: line.explorerUnavailable,
+      ...settings,
     };
   }
 
@@ -237,12 +258,15 @@ export async function buildStep(
         progressed = true;
       }
       if (explorer.has(epd) || explorerTried.has(epd)) continue;
-      explorerTried.add(epd);
       if (unauthorized) {
+        explorerTried.add(epd);
         explorer.set(epd, null);
         progressed = true;
         continue;
       }
+      // Trop tard pour un appel de 10 s : la position reste à demander à l'étape suivante.
+      if (elapsed() >= BUILD_EXPLORER_CUTOFF_MS) continue;
+      explorerTried.add(epd);
       explorerTasks.push(
         store.explorer(epd, budget).then((found) => {
           if (found === "missing") return; // 429 ou budget épuisé : nouvelle tentative à l'étape suivante
@@ -277,7 +301,7 @@ export async function buildStep(
   }
 
   let result = assemble();
-  for (let i = 0; i < MAX_ITERATIONS && !result.complete; i++) {
+  for (let i = 0; i < MAX_ITERATIONS && !result.complete && elapsed() < BUILD_STEP_BUDGET_MS; i++) {
     if (!(await resolve(result))) break;
     result = assemble();
   }
@@ -296,6 +320,7 @@ export async function buildStep(
     needs: result.needs,
     progress: { branches: result.branches.length, pending: result.needs.length },
     explorerUnavailable: line.explorerUnavailable || unauthorized,
+    ...settings,
   };
 }
 
