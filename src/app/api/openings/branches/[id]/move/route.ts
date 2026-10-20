@@ -2,7 +2,7 @@ import { Chess } from "chess.js";
 import { z } from "zod";
 import { playUci, uciLineToSan } from "@/lib/analysis/lines";
 import { getAuthorizedUser } from "@/lib/db/server";
-import { judgeLineMove, normalizeCastling } from "@/lib/repertoire/recite";
+import { judgeLineMove, normalizeCastling, resolveNeeds } from "@/lib/repertoire/recite";
 import { createSupabaseLineStore, loadServerAnalyses } from "@/lib/repertoire/store";
 import { positionAfter } from "@/lib/training/attempt";
 
@@ -87,7 +87,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       case "illegal":
         return errorResponse(400, "Ce coup n'est pas légal dans cette position.");
       case "needs_analysis":
-        return Response.json({ verdict: "needs_analysis", needs: result.needs, depth: line.depth }, { status: 409 });
+        return Response.json({ verdict: "needs_analysis", needs: resolveNeeds(result.needs, line.multipv), depth: line.depth }, { status: 409 });
       case "alternative":
         return Response.json({
           verdict: "alternative",

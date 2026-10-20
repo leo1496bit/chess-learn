@@ -92,3 +92,8 @@ export function judgeLineMove(input: JudgeLineMoveInput): LineMoveVerdict {
 export function reviewSucceeded(input: { hints: number; revealed: number }): boolean {
   return input.revealed === 0 && input.hints <= 1;
 }
+
+/** Remplace "line" par le MultiPV de la ligne : le navigateur reçoit des nombres. */
+export function resolveNeeds(needs: readonly AnalysisNeed[], lineMultipv: number): { fen: string; multipv: number }[] {
+  return needs.map((n) => ({ fen: n.fen, multipv: n.multipv === "line" ? lineMultipv : n.multipv }));
+}

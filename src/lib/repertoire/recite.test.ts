@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ENGINE_VERSION, type PositionAnalysis } from "@/lib/analysis/types";
 import { NEAR_BEST_LOSS } from "./constants";
-import { judgeLineMove, reviewSucceeded } from "./recite";
+import { judgeLineMove, resolveNeeds, reviewSucceeded } from "./recite";
 
 const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const CASTLE = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1";
@@ -100,5 +100,13 @@ describe("reviewSucceeded", () => {
     expect(reviewSucceeded({ hints: 1, revealed: 0 })).toBe(true);
     expect(reviewSucceeded({ hints: 2, revealed: 0 })).toBe(false);
     expect(reviewSucceeded({ hints: 0, revealed: 1 })).toBe(false);
+  });
+});
+
+describe("resolveNeeds", () => {
+  it('remplace "line" par le MultiPV de la ligne et garde 1', () => {
+    expect(
+      resolveNeeds([{ fen: "a", multipv: "line" }, { fen: "b", multipv: 1 }], 3),
+    ).toEqual([{ fen: "a", multipv: 3 }, { fen: "b", multipv: 1 }]);
   });
 });
