@@ -79,13 +79,18 @@ describe("judgeLineMove", () => {
 
   it("analyse manquante : needs_analysis avec les FEN à analyser", () => {
     const res = judgeLineMove({ fen: START, expectedUci: "e2e4", answerUci: "d2d4", color: "w" });
-    expect(res).toEqual({ verdict: "needs_analysis", fens: [AFTER_E4, AFTER_D4, START] });
+    expect(res).toEqual({ verdict: "needs_analysis", needs: [
+        { fen: AFTER_E4, multipv: 1 },
+        { fen: AFTER_D4, multipv: 1 },
+        { fen: START, multipv: "line" },
+      ],
+    });
   });
 
   it("MultiPV présent mais sans le coup joué : seule la position après ce coup est demandée", () => {
     const before = analysis(START, [{ uci: "e2e4", cp: 0 }]);
     const res = judgeLineMove({ fen: START, expectedUci: "e2e4", answerUci: "d2d4", color: "w", before });
-    expect(res).toEqual({ verdict: "needs_analysis", fens: [AFTER_D4] });
+    expect(res).toEqual({ verdict: "needs_analysis", needs: [{ fen: AFTER_D4, multipv: 1 }] });
   });
 });
 

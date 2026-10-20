@@ -43,6 +43,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       .from("opening_branches")
       .select("line_id, path_uci")
       .eq("id", id.data)
+      .eq("archived", false)
       .maybeSingle();
     if (error) throw error;
     if (!branch) return errorResponse(404, "Branche introuvable.");
@@ -59,6 +60,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     for (const uci of branch.path_uci.slice(0, index)) {
       if (!playUci(chess, uci)) throw new Error(`Branche ${id.data} : coup ${uci} illégal`);
     }
+    if (chess.turn() !== line.playerColor) return errorResponse(400, "Ce n'est pas à toi de jouer à cet index.");
     const fen = chess.fen();
     const expectedUci = branch.path_uci[index];
 
@@ -85,7 +87,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       case "illegal":
         return errorResponse(400, "Ce coup n'est pas légal dans cette position.");
       case "needs_analysis":
-        return Response.json({ verdict: "needs_analysis", fens: result.fens, depth: line.depth }, { status: 409 });
+        return Response.json({ verdict: "needs_analysis", needs: result.needs, depth: line.depth }, { status: 409 });
       case "alternative":
         return Response.json({
           verdict: "alternative",

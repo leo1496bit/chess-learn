@@ -35,6 +35,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       .from("opening_branches")
       .select("id, interval_days, attempts, successes, studied_at")
       .eq("id", id.data)
+      .eq("archived", false)
       .maybeSingle();
     if (error) throw error;
     if (!branch) return errorResponse(404, "Branche introuvable.");

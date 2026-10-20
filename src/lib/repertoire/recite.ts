@@ -7,10 +7,13 @@ import { moverWinPercent } from "@/lib/analysis/win";
 import { positionAfter } from "@/lib/training/attempt";
 import { NEAR_BEST_LOSS } from "./constants";
 
+/** Position à analyser : `multipv: "line"` = le MultiPV de la ligne, sinon 1 (positions après coup). */
+export type AnalysisNeed = { fen: string; multipv: "line" | 1 };
+
 export type LineMoveVerdict =
   | { verdict: "expected" }
   | { verdict: "alternative" | "wrong"; loss: number }
-  | { verdict: "needs_analysis"; fens: string[] }
+  | { verdict: "needs_analysis"; needs: AnalysisNeed[] }
   | { verdict: "illegal" };
 
 export type JudgeLineMoveInput = {
@@ -73,11 +76,11 @@ export function judgeLineMove(input: JudgeLineMoveInput): LineMoveVerdict {
   const expectedEval = moveEvaluation(fen, expected.fenAfter, before, input.expectedAfter);
   const answerEval = moveEvaluation(fen, answer.fenAfter, before, input.answerAfter);
   if (!expectedEval || !answerEval) {
-    const fens: string[] = [];
-    if (!expectedEval) fens.push(expected.fenAfter);
-    if (!answerEval) fens.push(answer.fenAfter);
-    if (!before) fens.push(fen);
-    return { verdict: "needs_analysis", fens };
+    const needs: AnalysisNeed[] = [];
+    if (!expectedEval) needs.push({ fen: expected.fenAfter, multipv: 1 });
+    if (!answerEval) needs.push({ fen: answer.fenAfter, multipv: 1 });
+    if (!before) needs.push({ fen, multipv: "line" });
+    return { verdict: "needs_analysis", needs };
   }
 
   const loss = Math.max(0, moverWinPercent(expectedEval, color) - moverWinPercent(answerEval, color));
