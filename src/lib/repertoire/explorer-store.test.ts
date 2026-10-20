@@ -86,10 +86,10 @@ describe("getExplorer", () => {
     expect(f.count()).toBe(0);
   });
 
-  it("429 : missing, rien d'écrit", async () => {
+  it("429 : rate_limited (distinct du budget épuisé), rien d'écrit", async () => {
     const db = fakeSupabase(null);
     const r = await getExplorer(db.client, "e", { token: "t", budget: { left: 5 }, now: NOW, fetchImpl: fakeFetch(429).impl });
-    expect(r).toBe("missing");
+    expect(r).toBe("rate_limited");
     expect(db.upserts).toEqual([]);
   });
 

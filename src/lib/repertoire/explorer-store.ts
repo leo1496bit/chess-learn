@@ -12,7 +12,8 @@ export type ExplorerOpts = {
 };
 
 /**
- * Cache `explorer_cache` puis API. "missing" : budget épuisé ou 429 (à retenter à l'étape suivante).
+ * Cache `explorer_cache` puis API. "missing" : budget de l'étape épuisé (à retenter à l'étape suivante).
+ * "rate_limited" : HTTP 429 (l'appelant attend avant de relancer).
  * "unauthorized" : jeton refusé (401). "unavailable" : pas de jeton ou service indisponible
  * (5xx, réseau, délai).
  */
@@ -20,7 +21,7 @@ export async function getExplorer(
   supabase: SupabaseServerClient,
   epd: string,
   opts: ExplorerOpts,
-): Promise<ExplorerResult | "missing" | "unavailable" | "unauthorized"> {
+): Promise<ExplorerResult | "missing" | "rate_limited" | "unavailable" | "unauthorized"> {
   const { data: row, error: readError } = await supabase
     .from("explorer_cache")
     .select("data, fetched_at")
@@ -41,7 +42,7 @@ export async function getExplorer(
   try {
     result = await fetchExplorer(epd, opts.token, opts.fetchImpl);
   } catch (e) {
-    if (e instanceof ExplorerError && e.code === "rate_limited") return "missing";
+    if (e instanceof ExplorerError && e.code === "rate_limited") return "rate_limited";
     if (e instanceof ExplorerError && e.code === "unauthorized") return "unauthorized";
     return "unavailable";
   }

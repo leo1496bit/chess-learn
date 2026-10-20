@@ -29,7 +29,9 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
     const store = createSupabaseLineStore(auth.supabase, { token: serverEnv.lichessToken, now });
     const line = await store.getLine(id.data);
     if (!line) return errorResponse(404, "Ligne introuvable.");
-    return Response.json(await buildStep(store, { book: OPENING_BOOK, now }, line));
+    // `retryAfterMs` (429 de Lichess) est renvoyé tel quel : le navigateur attend avant de relancer.
+    const explorerConfigured = Boolean(serverEnv.lichessToken);
+    return Response.json(await buildStep(store, { book: OPENING_BOOK, now, explorerConfigured }, line));
   } catch (error) {
     console.error("[openings/lines/build] Étape de construction échouée", error);
     return errorResponse(500, "La construction de la ligne a échoué. Réessaie dans un instant.");

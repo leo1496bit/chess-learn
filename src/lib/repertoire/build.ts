@@ -6,7 +6,7 @@ import { playUci } from "@/lib/analysis/lines";
 import type { Color, PositionAnalysis } from "@/lib/analysis/types";
 import type { ExplorerResult } from "@/lib/lichess/explorer";
 import { identifyOpening, toEpd, type OpeningBook } from "@/lib/openings/identify";
-import { EXPLORER_FETCHES_PER_STEP, MAX_PLY } from "./constants";
+import { EXPLORER_FETCHES_PER_STEP, EXPLORER_RETRY_AFTER_MS, MAX_PLY } from "./constants";
 import { mergeBranches, type BranchMerge, type ExistingBranch } from "./merge";
 import { buildTree, type AnalysisNeed, type TreeDeps, type TreeResult } from "./tree";
 
@@ -67,7 +67,8 @@ export type LinePatch = {
   multipv?: number;
 };
 
-export type ExplorerLookup = ExplorerResult | "missing" | "unavailable" | "unauthorized";
+/** "missing" : budget de l'étape épuisé ; "rate_limited" : HTTP 429 (voir `getExplorer`). */
+export type ExplorerLookup = ExplorerResult | "missing" | "rate_limited" | "unavailable" | "unauthorized";
 export type OwnReply = { uci: string; san: string; games: number };
 
 export interface LineStore {
@@ -180,6 +181,8 @@ export type BuildStepResult = {
   explorerUnavailable: boolean;
   depth: number;
   multipv: number;
+  /** Présent après un 429 de l'explorateur : attendre ce délai avant l'étape suivante. */
+  retryAfterMs?: number;
 };
 
 /**
@@ -187,23 +190,27 @@ export type BuildStepResult = {
  * (cache d'analyses, réponses de ses parties, explorateur avec un budget d'appels) et recommence tant
  * que l'étape apporte du nouveau. Renvoie les analyses que le navigateur doit encore calculer.
  * Quand l'arbre est complet, fusionne les branches et passe la ligne à « ready ».
+ * Les appels à l'explorateur se font un par un ; après un 429, plus aucun pour l'étape, et la réponse
+ * porte `retryAfterMs`. `explorerConfigured: false` (pas de jeton) : `explorerUnavailable` dans la
+ * réponse, sans écrire la colonne (réservée au jeton refusé, 401).
  */
 export async function buildStep(
   store: LineStore,
-  deps: { book: OpeningBook; now: Date; clock?: () => number },
+  deps: { book: OpeningBook; now: Date; clock?: () => number; explorerConfigured?: boolean },
   line: LineRecord,
 ): Promise<BuildStepResult> {
   const clock = deps.clock ?? Date.now;
   const startedAt = clock();
   const elapsed = () => clock() - startedAt;
   const settings = { depth: line.depth, multipv: line.multipv };
+  const noToken = deps.explorerConfigured === false;
   if (line.status === "ready") {
     const branches = await store.listBranches(line.id);
     return {
       status: "ready",
       needs: [],
       progress: { branches: branches.filter((b) => !b.archived).length, pending: 0 },
-      explorerUnavailable: line.explorerUnavailable,
+      explorerUnavailable: line.explorerUnavailable || noToken,
       ...settings,
     };
   }
@@ -215,6 +222,7 @@ export async function buildStep(
   const explorerTried = new Set<string>();
   const budget = { left: EXPLORER_FETCHES_PER_STEP };
   let unauthorized = false;
+  let rateLimited = false;
 
   const treeDeps: TreeDeps = {
     analysis: (fen, multipv) => analyses.get(`${fen}|${multipv}`),
@@ -244,7 +252,7 @@ export async function buildStep(
     }
 
     const ownTasks: Promise<void>[] = [];
-    const explorerTasks: Promise<void>[] = [];
+    const explorerQueue: string[] = [];
     for (const epd of result.needsReplies) {
       // Les réponses de ses parties ne servent qu'aux positions où l'adversaire est au trait.
       const opponentToMove = epd.split(" ")[1] !== line.playerColor;
@@ -264,17 +272,26 @@ export async function buildStep(
         progressed = true;
         continue;
       }
-      // Trop tard pour un appel de 10 s : la position reste à demander à l'étape suivante.
-      if (elapsed() >= BUILD_EXPLORER_CUTOFF_MS) continue;
-      explorerTried.add(epd);
-      explorerTasks.push(
-        store.explorer(epd, budget).then((found) => {
-          if (found === "missing") return; // 429 ou budget épuisé : nouvelle tentative à l'étape suivante
-          if (found === "unauthorized") unauthorized = true;
-          explorer.set(epd, found === "unauthorized" || found === "unavailable" ? null : found);
-          progressed = true;
-        }),
-      );
+      explorerQueue.push(epd);
+    }
+
+    /** Un appel à la fois (l'explorateur limite le débit), avec le même budget. */
+    async function runExplorer() {
+      for (const epd of explorerQueue) {
+        // Après un 429 ou un 401, plus aucun appel ; trop tard pour un appel de 10 s : la position
+        // reste à demander à l'étape suivante.
+        if (rateLimited || unauthorized || elapsed() >= BUILD_EXPLORER_CUTOFF_MS) return;
+        explorerTried.add(epd);
+        const found = await store.explorer(epd, budget);
+        if (found === "missing") continue; // budget épuisé : nouvelle tentative à l'étape suivante
+        if (found === "rate_limited") {
+          rateLimited = true;
+          return;
+        }
+        if (found === "unauthorized") unauthorized = true;
+        explorer.set(epd, found === "unauthorized" || found === "unavailable" ? null : found);
+        progressed = true;
+      }
     }
 
     const analysisTasks = [...byMultipv].map(([multipv, fens]) =>
@@ -286,7 +303,7 @@ export async function buildStep(
       }),
     );
 
-    await Promise.all([...analysisTasks, ...ownTasks, ...explorerTasks]);
+    await Promise.all([...analysisTasks, ...ownTasks, runExplorer()]);
     // Après un 401, l'explorateur est ignoré pour le reste de l'étape.
     if (unauthorized) {
       for (const epd of result.needsReplies) {
@@ -319,8 +336,9 @@ export async function buildStep(
     status: result.complete ? "ready" : "building",
     needs: result.needs,
     progress: { branches: result.branches.length, pending: result.needs.length },
-    explorerUnavailable: line.explorerUnavailable || unauthorized,
+    explorerUnavailable: line.explorerUnavailable || unauthorized || noToken,
     ...settings,
+    ...(rateLimited && !result.complete ? { retryAfterMs: EXPLORER_RETRY_AFTER_MS } : {}),
   };
 }
 

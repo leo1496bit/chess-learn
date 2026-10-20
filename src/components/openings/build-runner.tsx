@@ -13,15 +13,33 @@ type BuildResponse = {
   explorerUnavailable: boolean;
   depth: number;
   multipv: number;
+  /** Après un 429 de l'explorateur Lichess : attendre avant l'étape suivante. */
+  retryAfterMs?: number;
 };
 
 type RunState =
   | { kind: "running"; remaining: number; analysed: number; branches: number }
+  | { kind: "waiting"; analysed: number; branches: number }
   | { kind: "ready"; branches: number }
   | { kind: "stalled" }
   | { kind: "error"; message: string };
 
 const STALLED_MESSAGE = "La construction n'avance plus. Réessaie dans quelques minutes.";
+const RATE_LIMITED_MESSAGE = "Lichess limite les requêtes : reprise dans 1 min.";
+
+/** Attente interruptible (quitter la page annule la boucle). */
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (ms <= 0 || signal.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+  });
+}
 
 function remainingLabel(n: number): string {
   if (n === 0) return "Construction de la ligne : lecture des réponses adverses…";
@@ -73,11 +91,16 @@ export function BuildRunner({
           onReadyRef.current();
           return;
         }
-        const step = stepBuildGuard(guard, body.needs);
-        guard = step.guard;
-        if (step.stalled) {
-          setState({ kind: "stalled" });
-          return;
+        const retryAfterMs = typeof body.retryAfterMs === "number" ? body.retryAfterMs : 0;
+        const resumeAt = Date.now() + retryAfterMs;
+        // Une étape freinée par Lichess (429) sans analyse demandée ne compte pas comme une étape vide.
+        if (retryAfterMs === 0 || body.needs.length > 0) {
+          const step = stepBuildGuard(guard, body.needs);
+          guard = step.guard;
+          if (step.stalled) {
+            setState({ kind: "stalled" });
+            return;
+          }
         }
         // Un seul worker Stockfish : analyses l'une après l'autre.
         for (let i = 0; i < body.needs.length; i++) {
@@ -85,6 +108,10 @@ export function BuildRunner({
           const need = body.needs[i];
           await analyzePositionCached(need.fen, { depth: body.depth, multipv: need.multipv, awaitStore: true, signal });
           analysed += 1;
+        }
+        if (retryAfterMs > 0) {
+          setState({ kind: "waiting", analysed, branches });
+          await wait(resumeAt - Date.now(), signal);
         }
         setState({ kind: "running", remaining: 0, analysed, branches });
       }
@@ -126,6 +153,7 @@ export function BuildRunner({
             </p>
           </>
         ) : null}
+        {state.kind === "waiting" ? <p className="text-sm font-medium">{RATE_LIMITED_MESSAGE}</p> : null}
         {state.kind === "ready" ? (
           <p className="text-sm font-medium">
             Ligne prête : {state.branches} branche{state.branches > 1 ? "s" : ""}.

@@ -11,7 +11,7 @@ import {
   LINE_START_ERROR,
   rebuildLine,
 } from "./build";
-import { EXPLORER_FETCHES_PER_STEP } from "./constants";
+import { EXPLORER_FETCHES_PER_STEP, EXPLORER_RETRY_AFTER_MS } from "./constants";
 import type { BranchMerge, ExistingBranch } from "./merge";
 import type { ExplorerLookup, LinePatch, LineRecord, LineStore, NewLine, RootStats } from "./build";
 
@@ -287,6 +287,61 @@ describe("buildStep", () => {
     const { store } = fakeStore({});
     const result = await buildStep(store, { book: {}, now: NOW }, line({ explorerUnavailable: true }));
     expect(result.explorerUnavailable).toBe(true);
+  });
+
+  it("appelle l'explorateur une position après l'autre dans une étape", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const replies = new Map([
+      [toEpd(AFTER_NF3), [{ uci: "b8c6", san: "Nc6", games: 5 }, { uci: "d7d6", san: "d6", games: 4 }]],
+    ]);
+    const { store, calls } = fakeStore({ replies });
+    const sequential: LineStore = {
+      ...store,
+      async explorer(epd, budget) {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 1));
+        inFlight--;
+        return store.explorer(epd, budget);
+      },
+    };
+    await buildStep(sequential, { book: {}, now: NOW }, line());
+    // Nc6 et d6 demandent l'explorateur au même assemblage.
+    expect(calls.explorer).toContain(toEpd(AFTER_NC6));
+    expect(calls.explorer).toContain(toEpd(fenAfter([...PREFIX, "g1f3", "d7d6"])));
+    expect(maxInFlight).toBe(1);
+  });
+
+  it("429 : arrête l'explorateur pour l'étape et demande d'attendre une minute", async () => {
+    const replies = new Map([
+      [toEpd(AFTER_NF3), [{ uci: "b8c6", san: "Nc6", games: 5 }, { uci: "d7d6", san: "d6", games: 4 }]],
+    ]);
+    const { store, calls } = fakeStore({ replies, explorer: () => "rate_limited" });
+    const result = await buildStep(store, { book: {}, now: NOW }, line());
+    expect(calls.explorer).toHaveLength(1);
+    expect(result.status).toBe("building");
+    expect(result.retryAfterMs).toBe(EXPLORER_RETRY_AFTER_MS);
+    expect(EXPLORER_RETRY_AFTER_MS).toBe(60_000);
+    expect(result.explorerUnavailable).toBe(false);
+    expect(calls.patches).toEqual([]);
+    expect(calls.merges).toEqual([]);
+  });
+
+  it("budget épuisé (missing) : pas de délai d'attente", async () => {
+    const { store } = fakeStore({ explorer: () => "missing" });
+    const result = await buildStep(store, { book: {}, now: NOW }, line());
+    expect(result.retryAfterMs).toBeUndefined();
+  });
+
+  it("sans jeton Lichess : explorerUnavailable dans la réponse, sans écrire la colonne", async () => {
+    const { store, calls } = fakeStore({});
+    const result = await buildStep(store, { book: {}, now: NOW, explorerConfigured: false }, line());
+    expect(result.status).toBe("ready");
+    expect(result.explorerUnavailable).toBe(true);
+    expect(calls.patches).toEqual([
+      { id: "line-1", patch: { status: "ready", kind: "master", builtAt: NOW.toISOString() } },
+    ]);
   });
 
   it("ne reconstruit pas une ligne déjà prête", async () => {

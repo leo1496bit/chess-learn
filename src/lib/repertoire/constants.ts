@@ -18,6 +18,8 @@ export const INDEX_PLIES = 30;
 export const BACKFILL_BATCH = 300;
 export const EXPLORER_TTL_DAYS = 30;
 export const EXPLORER_FETCHES_PER_STEP = 8;
+/** Attente demandée au navigateur après un HTTP 429 de l'explorateur, avant l'étape suivante (ms). */
+export const EXPLORER_RETRY_AFTER_MS = 60_000;
 export const PLAYER_CANDIDATES = 2;
 /** Étapes de construction consécutives sans analyse demandée avant d'arrêter la boucle du navigateur. */
 export const BUILD_STALL_STEPS = 5;
