@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,9 @@ import { moveNumberLabel } from "@/lib/analysis/labels";
 import { cn } from "@/lib/utils";
 import { CONFIDENCE_LABELS, type ApiErrorBody } from "@/lib/ai/schema";
 import { TRAINING_CATEGORY_LABELS, type GameReport, type GameReportResponse } from "@/lib/ai/report/schema";
+import { buildReportMoveLinks, indexMoveLinks } from "@/lib/ai/move-links";
+import type { MoveAnalysis, Thresholds } from "@/lib/analysis/types";
+import { LinkedText, type MovePreviewProps } from "./linked-text";
 
 type State =
   | { kind: "loading" }
@@ -26,13 +29,31 @@ export function GameReportPanel({
   analyzed,
   sanByPly,
   onSelectPly,
+  moves,
+  thresholds,
+  onPreviewMove,
+  previewKey,
 }: {
   gameId: string;
   /** La partie a une analyse Stockfish enregistrée. */
   analyzed: boolean;
   sanByPly: ReadonlyMap<number, string>;
   onSelectPly: (ply: number) => void;
-}) {
+  /** Analyse de la partie : relie les coups cités dans le bilan à leur position. */
+  moves: readonly MoveAnalysis[] | null;
+  thresholds: Thresholds;
+} & MovePreviewProps) {
+  const links = useMemo(() => indexMoveLinks(moves ? buildReportMoveLinks(moves, thresholds) : []), [moves, thresholds]);
+  // Un passage rattaché à un demi-coup départage les coups cités sans numéro.
+  const text = (value: string, contextPly: number | null = null) => (
+    <LinkedText
+      text={value}
+      index={links}
+      options={{ ambiguous: "none", contextPly }}
+      onPreviewMove={onPreviewMove}
+      previewKey={previewKey}
+    />
+  );
   const [state, setState] = useState<State>(() => {
     const hit = reportCache.get(gameId);
     return hit ? { kind: "ready", data: hit } : { kind: "loading" };
@@ -148,6 +169,7 @@ export function GameReportPanel({
         <ReportBody
           data={state.kind === "ready" ? state.data : (state.previous as GameReportResponse)}
           plyButton={plyButton}
+          text={text}
           onRegenerate={() => generate(true)}
         />
       ) : null}
@@ -172,10 +194,13 @@ function Block({ title, tone, children }: { title: string; tone?: "tactical" | "
 function ReportBody({
   data,
   plyButton,
+  text,
   onRegenerate,
 }: {
   data: GameReportResponse;
   plyButton: (ply: number) => ReactNode;
+  /** Texte avec coups cliquables, rattaché éventuellement à un demi-coup. */
+  text: (value: string, contextPly?: number | null) => ReactNode;
   onRegenerate: () => void;
 }) {
   const report: GameReport = data.report;
@@ -206,17 +231,17 @@ function ReportBody({
         </p>
       ) : null}
 
-      <p className="max-w-prose text-[1.0625rem] leading-relaxed">{report.summary}</p>
+      <p className="max-w-prose text-[1.0625rem] leading-relaxed">{text(report.summary)}</p>
 
       <Block title={`Ouverture : ${report.opening.name}`}>
-        <p className="max-w-prose leading-relaxed">{report.opening.assessment}</p>
+        <p className="max-w-prose leading-relaxed">{text(report.opening.assessment)}</p>
         {report.opening.theoryGap ? (
           <p className="max-w-prose leading-relaxed">
             <span className="font-semibold text-cls-inaccuracy">Lacune théorique. </span>
-            {report.opening.theoryGap}
+            {text(report.opening.theoryGap)}
           </p>
         ) : null}
-        <p className="max-w-prose leading-relaxed text-muted-foreground">{report.opening.studyAdvice}</p>
+        <p className="max-w-prose leading-relaxed text-muted-foreground">{text(report.opening.studyAdvice)}</p>
       </Block>
 
       {report.tacticalErrors.length > 0 ? (
@@ -226,9 +251,9 @@ function ReportBody({
               <li key={i} className="space-y-1">
                 <p className="flex flex-wrap items-center gap-2 font-medium">
                   {plyButton(e.ply)}
-                  {e.title}
+                  {text(e.title, e.ply)}
                 </p>
-                <p className="max-w-prose leading-relaxed text-foreground/90">{e.explanation}</p>
+                <p className="max-w-prose leading-relaxed text-foreground/90">{text(e.explanation, e.ply)}</p>
               </li>
             ))}
           </ul>
@@ -242,9 +267,9 @@ function ReportBody({
               <li key={i} className="space-y-1">
                 <p className="flex flex-wrap items-center gap-2 font-medium">
                   {e.ply !== null ? plyButton(e.ply) : null}
-                  {e.title}
+                  {text(e.title, e.ply)}
                 </p>
-                <p className="max-w-prose leading-relaxed text-foreground/90">{e.explanation}</p>
+                <p className="max-w-prose leading-relaxed text-foreground/90">{text(e.explanation, e.ply)}</p>
               </li>
             ))}
           </ul>
@@ -257,7 +282,7 @@ function ReportBody({
             {report.missedOpportunities.map((e, i) => (
               <li key={i} className="flex flex-wrap items-baseline gap-2">
                 {plyButton(e.ply)}
-                <span className="max-w-prose leading-relaxed">{e.explanation}</span>
+                <span className="max-w-prose leading-relaxed">{text(e.explanation, e.ply)}</span>
               </li>
             ))}
           </ul>
@@ -266,7 +291,7 @@ function ReportBody({
 
       {report.endgame ? (
         <Block title="Finale">
-          <p className="max-w-prose leading-relaxed">{report.endgame}</p>
+          <p className="max-w-prose leading-relaxed">{text(report.endgame)}</p>
         </Block>
       ) : null}
 
@@ -275,7 +300,7 @@ function ReportBody({
           <ul className="list-disc space-y-1 pl-4">
             {report.strengths.map((s, i) => (
               <li key={i} className="max-w-prose leading-relaxed">
-                {s}
+                {text(s)}
               </li>
             ))}
           </ul>
@@ -292,9 +317,9 @@ function ReportBody({
                   <span className="rounded bg-background px-1.5 py-0.5 text-xs font-semibold text-muted-foreground">
                     {TRAINING_CATEGORY_LABELS[item.category]}
                   </span>
-                  <span className="font-semibold">{item.title}</span>
+                  <span className="font-semibold">{text(item.title, item.plies.length === 1 ? item.plies[0] : null)}</span>
                 </p>
-                <p className="max-w-prose leading-relaxed text-foreground/90">{item.why}</p>
+                <p className="max-w-prose leading-relaxed text-foreground/90">{text(item.why, item.plies.length === 1 ? item.plies[0] : null)}</p>
                 {item.plies.length > 0 ? <p className="flex flex-wrap gap-1.5">{item.plies.map((ply) => plyButton(ply))}</p> : null}
               </li>
             ))}

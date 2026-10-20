@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,8 +8,8 @@ import { ClassificationBadge, MissedWinBadge } from "@/components/chess/classifi
 import { cn } from "@/lib/utils";
 import type { MoveAnalysis } from "@/lib/analysis/types";
 import { isFlaggedMove } from "@/lib/ai/eligibility";
-import { buildMoveLinks, type MoveLink } from "@/lib/ai/move-links";
-import { normalizeSan, segmentSan } from "@/lib/ai/verify";
+import { buildMoveLinks, indexMoveLinks } from "@/lib/ai/move-links";
+import { LinkedText, type MovePreviewProps } from "./linked-text";
 import {
   CONFIDENCE_LABELS,
   ERROR_TYPE_LABELS,
@@ -122,9 +122,6 @@ function sectionsFor(flagged: boolean, byPlayer: boolean): { key: SectionKey; ti
   ];
 }
 
-/** Clé d'un aperçu de coup (position + coup), pour marquer le coup affiché. */
-export const moveLinkKey = (link: Pick<MoveLink, "fen" | "uci">) => `${link.fen}|${link.uci}`;
-
 export function ExplanationPanel({
   gameId,
   move,
@@ -133,11 +130,7 @@ export function ExplanationPanel({
 }: {
   gameId: string;
   move: MoveAnalysis;
-  /** Affiche un coup cité sur l'échiquier (position avant le coup + flèche). */
-  onPreviewMove?: (link: MoveLink) => void;
-  /** Coup actuellement affiché en aperçu (voir moveLinkKey). */
-  previewKey?: string | null;
-}) {
+} & MovePreviewProps) {
   const key = `${gameId}:${move.ply}`;
   // L'état est rattaché au coup affiché : changer de coup repart de « chargement du cache ».
   const [entry, setEntry] = useState<{ key: string; state: State } | null>(null);
@@ -251,40 +244,8 @@ export function ExplanationPanel({
   );
 }
 
-/** Texte d'une rubrique : les coups cités qui figurent dans les variantes deviennent des boutons. */
-function LinkedText({
-  text,
-  links,
-  onPreviewMove,
-  previewKey,
-}: {
-  text: string;
-  links: Map<string, MoveLink>;
-  onPreviewMove?: (link: MoveLink) => void;
-  previewKey?: string | null;
-}): ReactNode {
-  if (!onPreviewMove) return text;
-  return segmentSan(text).map((segment, i) => {
-    const link = segment.san ? links.get(normalizeSan(segment.san)) : undefined;
-    if (!link) return segment.text;
-    const active = previewKey === moveLinkKey(link);
-    return (
-      <button
-        key={i}
-        type="button"
-        onClick={() => onPreviewMove(link)}
-        aria-pressed={active}
-        title="Voir ce coup sur l'échiquier"
-        className={cn(
-          "tabular rounded px-0.5 font-semibold text-primary underline decoration-dotted decoration-primary/50 underline-offset-4 hover:bg-accent",
-          active && "bg-primary text-primary-foreground no-underline hover:bg-primary",
-        )}
-      >
-        {segment.text}
-      </button>
-    );
-  });
-}
+/** Explication d'un seul coup : un coup ambigu prend la variante prioritaire. */
+const LINK_OPTIONS = { ambiguous: "first" } as const;
 
 function ExplanationBody({
   data,
@@ -294,11 +255,9 @@ function ExplanationBody({
 }: {
   data: Loaded;
   move: MoveAnalysis;
-  onPreviewMove?: (link: MoveLink) => void;
-  previewKey?: string | null;
-}) {
+} & MovePreviewProps) {
   const { explanation, verified, cached } = data;
-  const links = useMemo(() => buildMoveLinks(move), [move]);
+  const links = useMemo(() => indexMoveLinks(buildMoveLinks(move)), [move]);
   const flagged = isFlaggedMove(move);
   const bestSan = flagged ? move.bestSan : null;
   return (
@@ -325,7 +284,13 @@ function ExplanationBody({
               {title}
               {key === "bestMove" && bestSan ? <span className="tabular ml-2 text-cls-best">{bestSan}</span> : null}
             </dt>
-            <dd className={cn("max-w-prose leading-relaxed", key === "lesson" && "font-medium")}><LinkedText text={explanation[key]} links={links} onPreviewMove={onPreviewMove} previewKey={previewKey} />
+            <dd className={cn("max-w-prose leading-relaxed", key === "lesson" && "font-medium")}><LinkedText
+                text={explanation[key]}
+                index={links}
+                options={LINK_OPTIONS}
+                onPreviewMove={onPreviewMove}
+                previewKey={previewKey}
+              />
             </dd>
           </div>
         ))}

@@ -8,8 +8,7 @@ import { MoveList, type MoveListItem } from "@/components/chess/move-list";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GameReportPanel } from "@/components/ai/game-report-panel";
-import { moveLinkKey } from "@/components/ai/explanation-panel";
-import type { MoveLink } from "@/lib/ai/move-links";
+import { moveLinkKey, type MoveLink } from "@/lib/ai/move-links";
 import { theoryForPly, type OpeningReport } from "@/lib/openings/identify";
 import { toast } from "sonner";
 import { isErrorClassification } from "@/lib/analysis/classify";
@@ -45,7 +44,7 @@ function arrowsFor(move: MoveAnalysis | undefined): BoardArrow[] {
 }
 
 const PREVIEW_SOURCE: Record<MoveLink["source"], (link: MoveLink) => string> = {
-  played: () => "coup joué",
+  played: () => "coup de la partie",
   candidate: (link) => (link.rank === 1 ? "variante du meilleur coup" : `variante du candidat ${link.rank}`),
   reply: () => "suite attendue après le coup joué",
 };
@@ -287,7 +286,16 @@ export function GameAnalysisView({
           </TabsContent>
           <TabsContent value="report">
             <div className="rounded-lg border bg-card p-4 sm:p-5">
-              <GameReportPanel gameId={game.id} analyzed={analysis !== null} sanByPly={sanByPly} onSelectPly={showPly} />
+              <GameReportPanel
+                gameId={game.id}
+                analyzed={analysis !== null}
+                sanByPly={sanByPly}
+                onSelectPly={showPly}
+                moves={moves}
+                thresholds={thresholds}
+                onPreviewMove={setPreview}
+                previewKey={preview ? moveLinkKey(preview) : null}
+              />
             </div>
           </TabsContent>
         </Tabs>
