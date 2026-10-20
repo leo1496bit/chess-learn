@@ -177,7 +177,8 @@ export async function createLine(
 export type BuildStepResult = {
   status: LineStatus;
   needs: AnalysisNeed[];
-  progress: { branches: number; pending: number };
+  /** `analysed` : positions déjà analysées utilisées par l'arbre (cumulé, persiste entre les étapes). */
+  progress: { branches: number; pending: number; analysed: number };
   explorerUnavailable: boolean;
   depth: number;
   multipv: number;
@@ -209,7 +210,7 @@ export async function buildStep(
     return {
       status: "ready",
       needs: [],
-      progress: { branches: branches.filter((b) => !b.archived).length, pending: 0 },
+      progress: { branches: branches.filter((b) => !b.archived).length, pending: 0, analysed: 0 },
       explorerUnavailable: line.explorerUnavailable || noToken,
       ...settings,
     };
@@ -335,7 +336,7 @@ export async function buildStep(
   return {
     status: result.complete ? "ready" : "building",
     needs: result.needs,
-    progress: { branches: result.branches.length, pending: result.needs.length },
+    progress: { branches: result.branches.length, pending: result.needs.length, analysed: analyses.size },
     explorerUnavailable: line.explorerUnavailable || unauthorized || noToken,
     ...settings,
     ...(rateLimited && !result.complete ? { retryAfterMs: EXPLORER_RETRY_AFTER_MS } : {}),

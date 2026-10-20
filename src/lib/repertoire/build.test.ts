@@ -228,7 +228,7 @@ describe("buildStep", () => {
     expect(result).toEqual({
       status: "ready",
       needs: [],
-      progress: { branches: 1, pending: 0 },
+      progress: { branches: 1, pending: 0, analysed: expect.any(Number) },
       explorerUnavailable: false,
       depth: 16,
       multipv: 3,
@@ -253,11 +253,24 @@ describe("buildStep", () => {
     const first = await buildStep(store, { book: {}, now: NOW }, line());
     expect(first.status).toBe("building");
     expect(first.needs).toEqual([{ fen: LEAF, multipv: 1 }]);
-    expect(first.progress).toEqual({ branches: 0, pending: 1 });
+    expect(first.progress).toMatchObject({ branches: 0, pending: 1 });
     const second = await buildStep(store, { book: {}, now: NOW }, line());
     expect(second).toEqual(first);
     expect(calls.merges).toEqual([]);
     expect(calls.patches).toEqual([]);
+  });
+
+  it("compte les positions déjà analysées : l'avancement ne repart pas de zéro d'une étape à l'autre", async () => {
+    const analyses = toyAnalyses();
+    const leaf = analyses.get(`${LEAF}|1`)!;
+    analyses.delete(`${LEAF}|1`);
+    const { store } = fakeStore({ analyses });
+    const first = await buildStep(store, { book: {}, now: NOW }, line());
+    expect(first.progress.analysed).toBeGreaterThan(0);
+    analyses.set(`${LEAF}|1`, leaf);
+    const done = await buildStep(store, { book: {}, now: NOW }, line());
+    expect(done.status).toBe("ready");
+    expect(done.progress.analysed).toBe(first.progress.analysed + 1);
   });
 
   it("reste en construction sans échouer si l'explorateur est saturé (429)", async () => {
@@ -355,7 +368,7 @@ describe("buildStep", () => {
     expect(result).toEqual({
       status: "ready",
       needs: [],
-      progress: { branches: 1, pending: 0 },
+      progress: { branches: 1, pending: 0, analysed: 0 },
       explorerUnavailable: false,
       depth: 16,
       multipv: 3,

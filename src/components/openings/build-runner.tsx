@@ -9,7 +9,8 @@ import { startBuildGuard, stepBuildGuard, type BuildNeed } from "@/lib/repertoir
 type BuildResponse = {
   status: "building" | "ready";
   needs: BuildNeed[];
-  progress: { branches: number; pending: number };
+  /** `analysed` : positions déjà analysées utilisées par l'arbre (cumulé côté serveur). */
+  progress: { branches: number; pending: number; analysed?: number };
   explorerUnavailable: boolean;
   depth: number;
   multipv: number;
@@ -18,7 +19,7 @@ type BuildResponse = {
 };
 
 type RunState =
-  | { kind: "running"; remaining: number; analysed: number; branches: number }
+  | { kind: "running"; remaining: number; step: number; analysed: number; branches: number }
   | { kind: "waiting"; analysed: number; branches: number }
   | { kind: "ready"; branches: number }
   | { kind: "stalled" }
@@ -41,9 +42,19 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function remainingLabel(n: number): string {
-  if (n === 0) return "Construction de la ligne : lecture des réponses adverses…";
-  return `Construction de la ligne : ${n} analyse${n > 1 ? "s" : ""} restante${n > 1 ? "s" : ""}`;
+function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${n} ${n > 1 ? pluralForm : singular}`;
+}
+
+/** Ce que fait la construction en ce moment ; les compteurs affichés au-dessus sont cumulés. */
+function currentLabel(remaining: number, step: number): string {
+  if (remaining === 0) return "Lecture des réponses adverses (tes parties et l'explorateur Lichess)…";
+  return `Stockfish analyse la position ${step - remaining + 1} sur ${step} de cette étape.`;
+}
+
+function elapsedLabel(startedAt: number, now: number): string {
+  const minutes = Math.floor((now - startedAt) / 60_000);
+  return minutes < 1 ? "commencée il y a moins d'une minute" : `commencée il y a ${plural(minutes, "minute")}`;
 }
 
 /**
@@ -60,7 +71,14 @@ export function BuildRunner({
   initialExplorerUnavailable: boolean;
   onReady: () => void;
 }) {
-  const [state, setState] = useState<RunState>({ kind: "running", remaining: 0, analysed: 0, branches: 0 });
+  const [state, setState] = useState<RunState>({ kind: "running", remaining: 0, step: 0, analysed: 0, branches: 0 });
+  // Durée affichée : rafraîchie toutes les 15 s pour montrer que la construction vit.
+  const [startedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, []);
   const [explorerUnavailable, setExplorerUnavailable] = useState(initialExplorerUnavailable);
   const [attempt, setAttempt] = useState(0);
   // Dernier rappel reçu, sans relancer la boucle quand le parent se rend à nouveau.
@@ -76,7 +94,7 @@ export function BuildRunner({
     async function run() {
       let guard = startBuildGuard();
       let analysed = 0;
-      setState({ kind: "running", remaining: 0, analysed: 0, branches: 0 });
+      setState({ kind: "running", remaining: 0, step: 0, analysed: 0, branches: 0 });
       while (!signal.aborted) {
         const response = await fetch(`/api/openings/lines/${lineId}/build`, { method: "POST", signal });
         const body = (await response.json().catch(() => null)) as (Partial<BuildResponse> & { error?: string }) | null;
@@ -86,6 +104,8 @@ export function BuildRunner({
         }
         if (body.explorerUnavailable) setExplorerUnavailable(true);
         const branches = body.progress?.branches ?? 0;
+        // Total cumulé du serveur (persiste entre les étapes et les visites) ; l'affichage ne recule jamais.
+        analysed = Math.max(analysed, body.progress?.analysed ?? 0);
         if (body.status === "ready") {
           setState({ kind: "ready", branches });
           onReadyRef.current();
@@ -104,7 +124,7 @@ export function BuildRunner({
         }
         // Un seul worker Stockfish : analyses l'une après l'autre.
         for (let i = 0; i < body.needs.length; i++) {
-          setState({ kind: "running", remaining: body.needs.length - i, analysed, branches });
+          setState({ kind: "running", remaining: body.needs.length - i, step: body.needs.length, analysed, branches });
           const need = body.needs[i];
           await analyzePositionCached(need.fen, { depth: body.depth, multipv: need.multipv, awaitStore: true, signal });
           analysed += 1;
@@ -113,7 +133,7 @@ export function BuildRunner({
           setState({ kind: "waiting", analysed, branches });
           await wait(resumeAt - Date.now(), signal);
         }
-        setState({ kind: "running", remaining: 0, analysed, branches });
+        setState({ kind: "running", remaining: 0, step: 0, analysed, branches });
       }
     }
 
@@ -142,14 +162,18 @@ export function BuildRunner({
       <div role="status" aria-live="polite" className="space-y-2">
         {state.kind === "running" ? (
           <>
-            <p className="text-sm font-medium">{remainingLabel(state.remaining)}</p>
+            <p className="text-sm font-medium">
+              Construction de la ligne : {plural(state.analysed, "position analysée", "positions analysées")}
+              {state.branches > 0 ? `, ${plural(state.branches, "branche terminée", "branches terminées")}` : ""}
+            </p>
             <Progress
               aria-label="Avancement de la construction"
               value={state.analysed + state.remaining > 0 ? (state.analysed / (state.analysed + state.remaining)) * 100 : 0}
             />
+            <p className="text-sm">{currentLabel(state.remaining, state.step)}</p>
             <p className="text-sm text-muted-foreground">
-              Stockfish analyse les positions dans ton navigateur. Garde la page ouverte ; si tu la fermes, la
-              construction reprendra à ton retour.
+              Une ligne demande en général 100 à 250 positions, soit 5 à 15 minutes ({elapsedLabel(startedAt, now)}).
+              Garde la page ouverte ; si tu la fermes, la construction reprendra là où elle en est.
             </p>
           </>
         ) : null}
