@@ -46,8 +46,18 @@ récitation ─► POST /api/openings/branches/[id]/move (verdict serveur) ; /re
 ```
 
 - Tables (migration `20261021000000_opening_lines.sql`, RLS) : `game_positions`, `opening_lines`,
-  `opening_branches`, `opening_branch_explanations`, `explorer_cache`. RPC : `opening_reply_stats`,
+  `opening_branches`, `opening_branch_explanations`, `explorer_cache`. RPC : `opening_reply_stats`
+  (tri par fréquence puis coup UCI, `20261022000000_opening_reply_order.sql`),
   `opening_position_stats`, `opening_root_stats`.
+- Arbre (`tree.ts`) : élagage par fréquence sur tout l'arbre, expansion « meilleur d'abord » (la réponse
+  la plus fréquente de chaque nœud ouvert, puis les autres par poids de chemin, parties propres avant
+  explorateur seul, ≤ 8 feuilles) ; seules les réponses retenues sont développées.
+- Explorateur pendant une étape de construction : appels un par un, budget par étape ; un 429 arrête
+  l'explorateur pour l'étape et la réponse porte `retryAfterMs: 60000`, que le navigateur attend
+  (« Lichess limite les requêtes : reprise dans 1 min. ») sans compter l'étape comme bloquée. Sans jeton,
+  la réponse porte `explorerUnavailable: true` (la colonne n'est écrite qu'après un 401).
+- IA par branche : client à 25 s par appel sans nouvel essai du SDK (route limitée à 60 s), nouvelle
+  tentative de vérification sautée après 30 s ; si elle échoue, la première réponse est gardée non vérifiée.
 - Routes `/api/openings` : `backfill`, `search`, `lines` (+ `lines/[id]/build`, `rebuild`),
   `branches/[id]/move`, `review`, `explain`. Pages : `/openings` (bibliothèque, suggestions) et
   `/openings/[id]` (arbre, étude, récitation).
