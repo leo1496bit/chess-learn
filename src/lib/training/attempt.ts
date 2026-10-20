@@ -19,7 +19,7 @@ export type AttemptBody = z.infer<typeof AttemptBodySchema>;
 export type Verdict = "good" | "inaccurate" | "error";
 
 export type AttemptJudgement =
-  | { ok: true; answerSan: string; correct: boolean; loss: number; verdict: Verdict; bestSan: string | null }
+  | { ok: true; answerSan: string; correct: boolean; loss: number; verdict: Verdict; bestSan: string | null; isBest: boolean }
   | { ok: false; error: string };
 
 /** Position obtenue après la réponse, ou null si le coup est illégal. */
@@ -46,5 +46,5 @@ export function judgeAttempt(
   const loss = Math.round(result.loss * 100) / 100;
   const correct = exercise.accepted_uci.includes(answerUci) || result.loss < ACCEPTED_LOSS;
   const verdict: Verdict = correct ? "good" : result.loss < thresholds.mistake ? "inaccurate" : "error";
-  return { ok: true, answerSan: result.san, correct, loss, verdict, bestSan: result.bestSan };
+  return { ok: true, answerSan: result.san, correct, loss, verdict, bestSan: result.bestSan, isBest: result.isBest };
 }

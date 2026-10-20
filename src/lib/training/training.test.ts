@@ -209,11 +209,12 @@ describe("jugement d'une réponse (serveur)", () => {
       correct: true,
       verdict: "good",
       bestSan: "Ng5",
+      isBest: true,
     });
   });
 
   it("juge par Stockfish un coup hors solution : perte faible = correct, forte = erreur", () => {
-    expect(judgeAttempt(exercise, "b1c3", before, after("b1c3", 50), DEFAULT_THRESHOLDS)).toMatchObject({ ok: true, correct: true });
+    expect(judgeAttempt(exercise, "b1c3", before, after("b1c3", 50), DEFAULT_THRESHOLDS)).toMatchObject({ ok: true, correct: true, isBest: false });
     const bad = judgeAttempt(exercise, "d2d3", before, after("d2d3", -300), DEFAULT_THRESHOLDS);
     expect(bad).toMatchObject({ ok: true, correct: false, verdict: "error" });
     if (bad.ok) expect(bad.loss).toBeGreaterThan(DEFAULT_THRESHOLDS.mistake);

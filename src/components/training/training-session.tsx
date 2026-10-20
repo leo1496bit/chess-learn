@@ -6,7 +6,10 @@ import { useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { ARROW_COLORS, ChessBoard, type BoardArrow } from "@/components/chess/chess-board";
 import { Button } from "@/components/ui/button";
+import { formatSanLine } from "@/lib/analysis/labels";
 import { parseUci, playUci, uciLineToSan } from "@/lib/analysis/lines";
+import { formatEvaluation } from "@/lib/analysis/win";
+import type { Color, Evaluation, PositionAnalysis } from "@/lib/analysis/types";
 import { analyzePositionCached } from "@/lib/engine";
 import { formatDate } from "@/lib/stats/format";
 import { PHASE_LABELS, THEME_LABELS } from "@/lib/stats/labels";
@@ -15,18 +18,34 @@ import { DIFFICULTY_LABELS } from "@/lib/training/select";
 import type { Verdict } from "@/lib/training/attempt";
 import { cn } from "@/lib/utils";
 
-type AttemptResponse = { correct: boolean; verdict: Verdict; loss: number; answerSan: string; bestSan: string | null };
+type AttemptResponse = {
+  correct: boolean;
+  verdict: Verdict;
+  loss: number;
+  answerSan: string;
+  bestSan: string | null;
+  isBest: boolean;
+};
+
+/** Variante rejouable depuis la position de l'exercice (premier coup inclus), validée par chess.js. */
+type Line = { uci: string[]; san: string[]; evaluation: Evaluation | null; sideToMoveAtEval: Color };
 
 type Answer = {
   uci: string;
   san: string;
   loss: number;
   verdict: Verdict;
-  engineBestSan: string | null;
-  save: "pending" | "saved" | { error: string };
+  correct: boolean;
+  isBest: boolean;
+  bestSan: string | null;
+  /** Variante du meilleur coup de Stockfish. */
+  bestLine: Line | null;
+  /** Suite attendue après le coup joué (ton coup + meilleure réponse et suite). */
+  yourLine: Line;
 };
 
 type Status = { kind: "solving" } | { kind: "evaluating"; san: string } | { kind: "answered" } | { kind: "failed"; message: string };
+type Replay = { which: "best" | "yours"; step: number };
 
 const VERDICT_TEXT: Record<Verdict, { title: string; className: string }> = {
   good: { title: "Bon coup", className: "border-cls-best/40 bg-cls-best/10 text-cls-best" },
@@ -35,10 +54,38 @@ const VERDICT_TEXT: Record<Verdict, { title: string; className: string }> = {
 };
 
 const lossFormat = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+const LINE_PLIES = 8;
 
 function arrowFor(uci: string, color: string): BoardArrow | null {
   const m = parseUci(uci);
   return m ? { from: m.from, to: m.to, color } : null;
+}
+
+const other = (color: Color): Color => (color === "w" ? "b" : "w");
+
+/** Lignes affichées après une réponse, à partir des analyses Stockfish déjà calculées. */
+function buildLines(fen: string, uci: string, before: PositionAnalysis, after: PositionAnalysis): { bestLine: Line | null; yourLine: Line } {
+  const side = fen.split(" ")[1] === "b" ? "b" : "w";
+  const best = before.lines[0];
+  const bestValidated = best ? uciLineToSan(fen, best.pvUci, LINE_PLIES) : null;
+  const bestLine: Line | null =
+    best && bestValidated && bestValidated.uci.length > 0
+      ? { ...bestValidated, evaluation: best.evaluation, sideToMoveAtEval: side }
+      : null;
+  const reply = after.lines[0];
+  const yours = uciLineToSan(fen, [uci, ...(reply?.pvUci ?? [])], LINE_PLIES);
+  const yourEvaluation = reply?.evaluation ?? after.terminal?.evaluation ?? null;
+  return { bestLine, yourLine: { ...yours, evaluation: yourEvaluation, sideToMoveAtEval: other(side) } };
+}
+
+function replayFens(fen: string, line: Line | null): string[] {
+  const chess = new Chess(fen);
+  const fens = [chess.fen()];
+  for (const uci of line?.uci ?? []) {
+    if (!playUci(chess, uci)) break;
+    fens.push(chess.fen());
+  }
+  return fens;
 }
 
 export function TrainingSession({
@@ -55,23 +102,14 @@ export function TrainingSession({
   const [boardFen, setBoardFen] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "solving" });
   const [answer, setAnswer] = useState<Answer | null>(null);
-  const [revealStep, setRevealStep] = useState<number | null>(null);
+  const [replay, setReplay] = useState<Replay | null>(null);
   const [tally, setTally] = useState({ done: 0, good: 0 });
   // Ignore les résultats d'une évaluation lancée sur un exercice qu'on a quitté.
   const run = useRef(0);
 
   const exercise = exercises[index] ?? null;
-
-  const revealFens = useMemo(() => {
-    if (!exercise) return [];
-    const chess = new Chess(exercise.fen);
-    const fens = [chess.fen()];
-    for (const step of exercise.solutionLine) {
-      if (!playUci(chess, step.uci)) break;
-      fens.push(chess.fen());
-    }
-    return fens;
-  }, [exercise]);
+  const replayLine = answer && replay ? (replay.which === "best" ? answer.bestLine : answer.yourLine) : null;
+  const fens = useMemo(() => (exercise && replayLine ? replayFens(exercise.fen, replayLine) : []), [exercise, replayLine]);
 
   if (!exercise) {
     return (
@@ -97,16 +135,16 @@ export function TrainingSession({
 
   const sideLabel = exercise.sideToMove === "w" ? "les Blancs" : "les Noirs";
   const playedInGame = uciLineToSan(exercise.fen, [exercise.playedUci], 1).san[0] ?? exercise.playedUci;
-  const revealing = revealStep !== null;
-  const shownFen = revealing ? (revealFens[revealStep] ?? exercise.fen) : (boardFen ?? exercise.fen);
-  const nextRevealMove = revealing ? exercise.solutionLine[revealStep] : undefined;
+  const replaying = replay !== null && replayLine !== null;
+  const shownFen = replaying ? (fens[replay.step] ?? exercise.fen) : (boardFen ?? exercise.fen);
 
   const arrows: BoardArrow[] = [];
-  if (revealing && nextRevealMove) {
-    const a = arrowFor(nextRevealMove.uci, ARROW_COLORS.best);
+  if (replaying) {
+    const next = replayLine.uci[replay.step];
+    const a = next ? arrowFor(next, replay.which === "best" ? ARROW_COLORS.best : ARROW_COLORS.neutral) : null;
     if (a) arrows.push(a);
   }
-  const lastAnswer = answer && !revealing ? parseUci(answer.uci) : null;
+  const lastAnswer = answer && !replaying && boardFen ? parseUci(answer.uci) : null;
 
   function reset(nextIndex: number) {
     run.current++;
@@ -114,7 +152,7 @@ export function TrainingSession({
     setBoardFen(null);
     setStatus({ kind: "solving" });
     setAnswer(null);
-    setRevealStep(null);
+    setReplay(null);
   }
 
   function onPieceDrop(from: string, to: string, promotion?: string): boolean {
@@ -135,8 +173,8 @@ export function TrainingSession({
     try {
       // Jugement par Stockfish uniquement. Les analyses (avant et après le coup) sont écrites dans le
       // cache avant l'envoi : le serveur les relit et calcule lui-même le verdict.
-      await analyzePositionCached(ex.fen, { depth, multipv, awaitStore: true });
-      await analyzePositionCached(fenAfter, { depth, multipv: 1, awaitStore: true });
+      const before = await analyzePositionCached(ex.fen, { depth, multipv, awaitStore: true });
+      const after = await analyzePositionCached(fenAfter, { depth, multipv: 1, awaitStore: true });
       if (current !== run.current) return;
 
       const response = await fetch("/api/training/attempt", {
@@ -150,7 +188,16 @@ export function TrainingSession({
         throw new Error(body.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`);
       }
       const correct = body.correct === true;
-      setAnswer({ uci, san, loss: body.loss, verdict: body.verdict, engineBestSan: body.bestSan ?? null, save: "saved" });
+      setAnswer({
+        uci,
+        san,
+        loss: body.loss,
+        verdict: body.verdict,
+        correct,
+        isBest: body.isBest === true,
+        bestSan: body.bestSan ?? null,
+        ...buildLines(ex.fen, uci, before, after),
+      });
       setStatus({ kind: "answered" });
       setTally((t) => ({ done: t.done + 1, good: t.good + (correct ? 1 : 0) }));
     } catch (error) {
@@ -161,6 +208,10 @@ export function TrainingSession({
       });
     }
   }
+
+  const startReplay = (which: Replay["which"]) => {
+    setReplay({ which, step: 0 });
+  };
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,32rem)_1fr]">
@@ -203,7 +254,7 @@ export function TrainingSession({
 
         {status.kind === "solving" ? (
           <p className="text-sm text-muted-foreground">
-            Fais glisser une pièce pour jouer ton coup. Stockfish l&apos;évaluera, puis tu verras la solution.
+            Fais glisser une pièce pour jouer ton coup. Stockfish l&apos;évaluera, puis tu verras le meilleur coup.
           </p>
         ) : null}
 
@@ -224,84 +275,94 @@ export function TrainingSession({
         ) : null}
 
         {status.kind === "answered" && answer ? (
-          <div aria-live="polite" className="space-y-4">
+          <div aria-live="polite" className="space-y-5">
             <div className={cn("space-y-1 rounded-lg border p-4", VERDICT_TEXT[answer.verdict].className)}>
               <p className="text-lg font-bold">
                 {VERDICT_TEXT[answer.verdict].title} : {answer.san}
               </p>
               <p className="text-sm text-foreground">
-                {answer.loss < 0.05
-                  ? "Aucune perte de pourcentage de gain par rapport au meilleur coup."
-                  : `Perte de ${lossFormat.format(answer.loss)} points de pourcentage de gain par rapport au meilleur coup.`}
+                {answer.isBest
+                  ? "C'est le meilleur coup selon Stockfish."
+                  : answer.correct
+                    ? `Presque aussi fort que le meilleur coup (${answer.bestSan ?? "?"}) : perte de ${lossFormat.format(answer.loss)} point${answer.loss >= 2 ? "s" : ""} de pourcentage de gain seulement.`
+                    : `Perte de ${lossFormat.format(answer.loss)} points de pourcentage de gain par rapport au meilleur coup.`}
               </p>
             </div>
 
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-              <dt className="text-muted-foreground">Solution</dt>
-              <dd className="font-semibold">{exercise.solutionSan}</dd>
-              {exercise.acceptedUci.length > 1 ? (
-                <>
-                  <dt className="text-muted-foreground">Aussi accepté</dt>
-                  <dd>
-                    {exercise.acceptedUci
-                      .filter((u) => u !== exercise.solutionUci)
-                      .map((u) => uciLineToSan(exercise.fen, [u], 1).san[0] ?? u)
-                      .join(", ")}
-                  </dd>
-                </>
-              ) : null}
-              <dt className="text-muted-foreground">Joué dans la partie</dt>
-              <dd>{playedInGame}</dd>
-            </dl>
-
-            {typeof answer.save === "object" ? (
-              <p role="alert" className="text-sm text-destructive">
-                Ta réponse n&apos;a pas été enregistrée : {answer.save.error}
-              </p>
+            {!answer.isBest && answer.bestLine ? (
+              <LineBlock
+                title="Le meilleur coup"
+                headline={answer.bestSan ?? answer.bestLine.san[0]}
+                fen={exercise.fen}
+                line={answer.bestLine}
+                active={replay?.which === "best"}
+                onReplay={() => startReplay("best")}
+                replayLabel="Rejouer la variante du meilleur coup"
+                tone="best"
+              />
             ) : null}
 
-            {revealing ? (
-              <div className="space-y-3">
-                <p className="text-sm font-semibold">Meilleure continuation</p>
-                <ol className="flex flex-wrap gap-x-1.5 gap-y-1 text-sm tabular">
-                  {exercise.solutionLine.map((step, i) => (
-                    <li key={`${i}-${step.uci}`}>
+            <LineBlock
+              title={answer.isBest ? "La suite" : "Ta suite"}
+              headline={null}
+              fen={exercise.fen}
+              line={answer.yourLine}
+              active={replay?.which === "yours"}
+              onReplay={() => startReplay("yours")}
+              replayLabel={answer.isBest ? "Rejouer la suite" : "Rejouer ta suite"}
+              tone="yours"
+            />
+
+            {replaying ? (
+              <div className="space-y-2">
+                <ol className="flex flex-wrap gap-x-1.5 gap-y-1 text-sm tabular" aria-label="Coups de la variante">
+                  {replayLine.san.map((san, i) => (
+                    <li key={`${i}-${replayLine.uci[i]}`}>
                       <button
                         type="button"
-                        onClick={() => setRevealStep(i + 1)}
-                        aria-current={revealStep === i + 1 ? "step" : undefined}
+                        onClick={() => setReplay({ ...replay, step: i + 1 })}
+                        aria-current={replay.step === i + 1 ? "step" : undefined}
                         className={cn(
                           "rounded px-1.5 py-0.5 hover:bg-muted",
-                          revealStep === i + 1 && "bg-primary font-semibold text-primary-foreground hover:bg-primary",
+                          replay.step === i + 1 && "bg-primary font-semibold text-primary-foreground hover:bg-primary",
                         )}
                       >
-                        {step.san}
+                        {san}
                       </button>
                     </li>
                   ))}
                 </ol>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" disabled={revealStep === 0} onClick={() => setRevealStep((s) => Math.max(0, (s ?? 0) - 1))}>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" disabled={replay.step === 0} onClick={() => setReplay({ ...replay, step: replay.step - 1 })}>
                     Coup précédent
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={revealStep >= revealFens.length - 1}
-                    onClick={() => setRevealStep((s) => Math.min(revealFens.length - 1, (s ?? 0) + 1))}
+                    disabled={replay.step >= fens.length - 1}
+                    onClick={() => setReplay({ ...replay, step: Math.min(fens.length - 1, replay.step + 1) })}
                   >
                     Coup suivant
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setReplay(null)}>
+                    Revenir à ma réponse
                   </Button>
                 </div>
               </div>
             ) : null}
 
-            <div className="flex flex-wrap gap-2">
-              {!revealing ? (
-                <Button variant="outline" onClick={() => setRevealStep(0)}>
-                  Voir la meilleure continuation
-                </Button>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              {exercise.acceptedUci.length > 1 ? (
+                <>
+                  <dt className="text-muted-foreground">Coups acceptés</dt>
+                  <dd>{exercise.acceptedUci.map((u) => uciLineToSan(exercise.fen, [u], 1).san[0] ?? u).join(", ")}</dd>
+                </>
               ) : null}
+              <dt className="text-muted-foreground">Joué dans ta partie</dt>
+              <dd>{playedInGame}</dd>
+            </dl>
+
+            <div className="flex flex-wrap gap-2">
               <Button onClick={() => reset(index + 1)}>Exercice suivant</Button>
               <Button asChild variant="ghost">
                 <Link href={`/games/${exercise.gameId}`}>Voir la partie d&apos;origine</Link>
@@ -317,5 +378,43 @@ export function TrainingSession({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function LineBlock({
+  title,
+  headline,
+  fen,
+  line,
+  active,
+  onReplay,
+  replayLabel,
+  tone,
+}: {
+  title: string;
+  headline: string | null;
+  fen: string;
+  line: Line;
+  active: boolean;
+  onReplay: () => void;
+  replayLabel: string;
+  tone: "best" | "yours";
+}) {
+  return (
+    <section className={cn("space-y-1.5 border-l-2 pl-4", tone === "best" ? "border-cls-best/60" : "border-primary/25")}>
+      <h3 className="text-sm font-semibold text-primary">{title}</h3>
+      {headline ? <p className="tabular text-2xl font-bold text-cls-best">{headline}</p> : null}
+      <p className="tabular text-sm">
+        {line.evaluation ? (
+          <span className="mr-2 font-semibold">{formatEvaluation(line.evaluation, line.sideToMoveAtEval)}</span>
+        ) : null}
+        {formatSanLine(fen, line.san)}
+      </p>
+      {line.uci.length > 0 ? (
+        <Button size="sm" variant={active ? "secondary" : "outline"} onClick={onReplay}>
+          {replayLabel}
+        </Button>
+      ) : null}
+    </section>
   );
 }

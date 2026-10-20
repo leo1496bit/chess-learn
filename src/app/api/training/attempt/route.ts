@@ -115,6 +115,7 @@ export async function POST(request: Request) {
       loss: judgement.loss,
       answerSan: judgement.answerSan,
       bestSan: judgement.bestSan,
+      isBest: judgement.isBest,
       intervalDays: review.intervalDays,
       dueAt: review.dueAt,
     });
