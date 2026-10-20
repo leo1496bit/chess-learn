@@ -112,3 +112,11 @@ describe("buildUserMessage — cadrage et théorie", () => {
     expect(buildUserMessage(BLACK_MISTAKE, GAME)).not.toContain("Théorie :");
   });
 });
+
+describe("buildUserMessage — coups autorisés et théorie", () => {
+  it("liste le coup de sortie de théorie parmi les coups autorisés", () => {
+    const message = buildUserMessage(BLACK_MISTAKE, { ...GAME, theory: { kind: "out", since: { ply: 5, san: "Be3" } } });
+    const allowedLine = message.split("\n").find((l) => l.startsWith("Coups autorisés")) ?? "";
+    expect(allowedLine).toContain("Be3");
+  });
+});

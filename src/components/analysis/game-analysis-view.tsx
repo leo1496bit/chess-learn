@@ -102,8 +102,11 @@ export function GameAnalysisView({
   const [preview, setPreview] = useState<MoveLink | null>(null);
   const [orientation, setOrientation] = useState<"white" | "black">(game.playerColor === "w" ? "white" : "black");
 
+  // Incrémenté à chaque analyse terminée : remonte le panneau du bilan pour relire son état (périmé).
+  const [analysisRun, setAnalysisRun] = useState(0);
   const { state, start, cancel } = useGameAnalysis((result) => {
     setAnalysis({ moves: result.moves, summary: result.summary, settings: engineSettings });
+    setAnalysisRun((n) => n + 1);
     if (result.partialPositions > 0) {
       toast.warning(
         `${result.partialPositions} position${result.partialPositions > 1 ? "s ont" : " a"} été analysée${result.partialPositions > 1 ? "s" : ""} moins profondément (délai dépassé). Relance l'analyse pour les recalculer.`,
@@ -202,9 +205,11 @@ export function GameAnalysisView({
         {/*
           L'échiquier reste visible pendant la lecture des explications :
           - grand écran : toute la colonne est collante, à une taille qui tient dans la hauteur de l'écran ;
-          - mobile : l'échiquier et la navigation restent épinglés sous l'en-tête, à environ 40 % de la hauteur.
+          - mobile : l'échiquier et la navigation restent épinglés sous l'en-tête, à environ 40 % de la hauteur,
+            pendant toute la lecture des onglets.
         */}
-        <div className="space-y-3 lg:sticky lg:top-6 lg:max-w-[calc(100dvh-14rem)] lg:self-start">
+        {/* « contents » sous lg : le bloc épinglé devient un enfant direct de la grille, qui contient aussi les onglets. */}
+        <div className="contents lg:block lg:sticky lg:top-6 lg:max-w-[calc(100dvh-14rem)] lg:space-y-3 lg:self-start">
           <div className="sticky top-14 z-20 -mx-4 space-y-2 bg-background/95 px-4 pt-2 pb-2 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:space-y-3 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
           <div className="mx-auto flex max-w-[min(100%,40dvh)] flex-col gap-2 lg:max-w-none lg:flex-row">
             <EvalBar evaluation={evaluation} orientation={orientation} sideToMove={sideToMove} className={moves ? undefined : "opacity-40"} />
@@ -287,6 +292,7 @@ export function GameAnalysisView({
           <TabsContent value="report">
             <div className="rounded-lg border bg-card p-4 sm:p-5">
               <GameReportPanel
+                key={analysisRun}
                 gameId={game.id}
                 analyzed={analysis !== null}
                 sanByPly={sanByPly}

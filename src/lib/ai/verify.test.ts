@@ -104,3 +104,18 @@ describe("verifyMoves — coups de tour", () => {
     expect(verifyMoves(["Il fallait jouer Cf3."], [], new Set(["Nf3"])).invalid).toContain("Cf3");
   });
 });
+
+describe("vérification — données de théorie transmises", () => {
+  it("ne compte pas comme coup un SAN contenu dans un nom d'ouverture transmis", () => {
+    const name = "King's Indian Attack, with Bf5";
+    const text = `Tu es dans la ${name} : le fou noir sort tôt.`;
+    expect(verifyMoves([text], [], new Set(["Nf3"]), [name])).toMatchObject({ valid: true, invalid: [] });
+    // Hors du nom, Bf5 reste un coup non autorisé.
+    expect(verifyMoves([`${text} Joue Bf5.`], [], new Set(["Nf3"]), [name]).invalid).toEqual(["Bf5"]);
+  });
+
+  it("autorise le coup de sortie de théorie transmis", () => {
+    expect(allowedMovesFor(BLACK_MISTAKE, { kind: "out", since: { ply: 5, san: "Be3" } }).has("Be3")).toBe(true);
+    expect(allowedMovesFor(BLACK_MISTAKE).has("Be3")).toBe(false);
+  });
+});

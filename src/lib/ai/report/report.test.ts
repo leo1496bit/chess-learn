@@ -13,7 +13,8 @@ import type { UsageSummary } from "../limits";
 import type { UsageRecord } from "../store";
 import { BLACK_MISTAKE } from "../test-fixtures";
 import { generateGameReport, type ReportStore, type StoredReport } from "./generate";
-import { buildReportInput, selectKeyMoments, type ReportGame } from "./input";
+import { buildReportInput, type ReportGame } from "./input";
+import { selectKeyMoments } from "./moments";
 import { REPORT_PROMPT_VERSION, REPORT_SYSTEM_PROMPT } from "./prompt";
 import type { GameReport } from "./schema";
 import { verifyReport } from "./verify";
@@ -206,5 +207,16 @@ describe("generateGameReport", () => {
 
   it("est versionné", () => {
     expect(REPORT_PROMPT_VERSION).toMatch(/^report-v\d+$/);
+  });
+});
+
+describe("bilan — noms d'ouverture contenant un SAN", () => {
+  it("valide un bilan qui reprend un nom d'ouverture transmis contenant un coup", () => {
+    // Nom réel du livre Lichess, avec un coup dans le nom.
+    const name = "King's Indian Attack: Symmetrical Defense, with Bf5";
+    const opening = { ...OPENING, name, family: "King's Indian Attack", variation: "Symmetrical Defense, with Bf5" };
+    const input = buildReportInput(GAME, MOVES, opening, DEFAULT_THRESHOLDS);
+    const report: GameReport = { ...REPORT, opening: { ...REPORT.opening, name } };
+    expect(verifyReport(report, input.allowedMoves, input.allowedPlies, input.protectedPhrases).valid).toBe(true);
   });
 });

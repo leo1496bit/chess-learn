@@ -11,13 +11,17 @@ import { OPENING_BOOK } from "@/lib/openings/book";
 import { identifyOpening, theoryForPly, type MoveTheory } from "@/lib/openings/identify";
 import type { Color } from "@/lib/analysis/types";
 
-/** Place du coup dans la théorie, recalculée depuis le PGN et le livre (jamais fournie par le client). */
-function theoryOf(pgn: string, playerColor: Color, ply: number): MoveTheory {
+/**
+ * Ouverture (nom du livre) et place du coup dans la théorie, recalculées depuis le PGN et le livre
+ * (jamais fournies par le client). Le nom d'ouverture de Chess.com n'est pas transmis à l'IA (§11).
+ */
+function openingOf(pgn: string, playerColor: Color, ply: number): { theory: MoveTheory; name: string | null; eco: string | null } {
   try {
     const { fens, moves } = extractPositions(pgn);
-    return theoryForPly(identifyOpening(fens, moves.map((m) => m.san), playerColor, OPENING_BOOK), ply);
+    const opening = identifyOpening(fens, moves.map((m) => m.san), playerColor, OPENING_BOOK);
+    return { theory: theoryForPly(opening, ply), name: opening.name, eco: opening.eco };
   } catch {
-    return { kind: "none" };
+    return { theory: { kind: "none" }, name: null, eco: null };
   }
 }
 
@@ -70,7 +74,7 @@ export async function POST(request: Request) {
 
   try {
     const [gameResult, moveResult] = await Promise.all([
-      supabase.from("games").select("white, black, player_color, opening_name, eco, pgn").eq("id", gameId).maybeSingle(),
+      supabase.from("games").select("white, black, player_color, pgn").eq("id", gameId).maybeSingle(),
       supabase.from("move_analyses").select("*").eq("game_id", gameId).eq("ply", ply).maybeSingle(),
     ]);
     if (gameResult.error) throw new Error(gameResult.error.message);
@@ -83,6 +87,7 @@ export async function POST(request: Request) {
     const move = rowToMoveAnalysis(moveResult.data);
     const game = gameResult.data;
     const playerColor: Color = game.player_color === "b" ? "b" : "w";
+    const opening = openingOf(game.pgn, playerColor, ply);
     const settings = await getSettings(supabase);
     const result = await explainMove({
       gameId,
@@ -91,9 +96,9 @@ export async function POST(request: Request) {
         white: game.white,
         black: game.black,
         playerColor,
-        openingName: game.opening_name,
-        eco: game.eco,
-        theory: theoryOf(game.pgn, playerColor, ply),
+        openingName: opening.name,
+        eco: opening.eco,
+        theory: opening.theory,
       },
       settings,
       store: createSupabaseExplanationStore(supabase),

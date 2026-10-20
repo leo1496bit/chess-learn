@@ -82,7 +82,7 @@ export async function generateGameReport(params: GenerateReportInput): Promise<G
     else if (result.kind === "truncated") [status, errorText] = ["error", "stop_reason: max_tokens"];
     else if (result.kind === "invalid_output") [status, errorText] = ["error", `sortie invalide : ${result.detail}`];
     else {
-      const check = verifyReport(result.value, input.allowedMoves, input.allowedPlies);
+      const check = verifyReport(result.value, input.allowedMoves, input.allowedPlies, input.protectedPhrases);
       if (!check.valid) [status, errorText] = ["unverified", `références non fournies : ${[...check.invalidMoves, ...check.invalidPlies].join(", ")}`];
     }
     await store.recordUsage({ status, ...result.usage, costUsd, error: errorText });
@@ -98,7 +98,7 @@ export async function generateGameReport(params: GenerateReportInput): Promise<G
   }
 
   let report: GameReport | null = first.kind === "parsed" ? first.value : null;
-  const check = report ? verifyReport(report, input.allowedMoves, input.allowedPlies) : null;
+  const check = report ? verifyReport(report, input.allowedMoves, input.allowedPlies, input.protectedPhrases) : null;
   let verified = check?.valid ?? false;
 
   if (!verified) {
@@ -107,7 +107,7 @@ export async function generateGameReport(params: GenerateReportInput): Promise<G
     if (report === null || checkLimits(settings, { callsToday, costMonth }).allowed) {
       const second = await attempt(input.text + "\n" + buildReportRetryReminder(check?.invalidMoves ?? [], check?.invalidPlies ?? []));
       if (second.kind === "parsed") {
-        const secondCheck = verifyReport(second.value, input.allowedMoves, input.allowedPlies);
+        const secondCheck = verifyReport(second.value, input.allowedMoves, input.allowedPlies, input.protectedPhrases);
         if (secondCheck.valid || report === null) {
           report = second.value;
           verified = secondCheck.valid;

@@ -8,6 +8,7 @@ import type { OpeningReport } from "@/lib/openings/identify";
 import { isFlaggedMove } from "../eligibility";
 import { CLASSIFICATION_NAMES, COLOR_NAMES, PHASE_NAMES, THEME_NAMES } from "../prompt";
 import { normalizeSan } from "../verify";
+import { selectKeyMoments } from "./moments";
 
 export type ReportGame = {
   white: string;
@@ -28,45 +29,19 @@ export type ReportInput = {
   allowedMoves: Set<string>;
   /** Demi-coups auxquels le bilan peut renvoyer. */
   allowedPlies: Set<number>;
+  /** Noms d'ouverture transmis : peuvent contenir un SAN (« …, with Bf5 ») sans être des coups cités. */
+  protectedPhrases: string[];
 };
 
-/** Nombre maximal de moments clés transmis (les plus coûteux d'abord). */
-export const MAX_KEY_MOMENTS = 12;
 /** Longueur maximale des variantes transmises. */
 const LINE_PLIES = 6;
 
 const RESULT_NAMES: Record<string, string> = { win: "victoire du joueur", loss: "défaite du joueur", draw: "partie nulle" };
 const ERROR_CLASSES: readonly Classification[] = ["inaccuracy", "mistake", "blunder"];
 
-type KeyMoment = { move: MoveAnalysis; unpunished: MoveAnalysis | null };
-
 function lineText(fen: string, line: ValidatedLine | null, maxPlies = LINE_PLIES): string | null {
   if (!line || line.san.length === 0) return null;
   return formatSanLine(fen, line.san.slice(0, maxPlies));
-}
-
-/**
- * Moments clés : écarts du joueur (les plus coûteux) et réponses du joueur qui n'ont pas puni une
- * erreur de l'adversaire. Triés dans l'ordre de la partie.
- */
-export function selectKeyMoments(moves: readonly MoveAnalysis[], thresholds: Thresholds): KeyMoment[] {
-  const byPly = new Map(moves.map((m) => [m.ply, m]));
-  const candidates = new Map<number, KeyMoment>();
-
-  for (const move of moves) {
-    if (!move.isPlayerMove) continue;
-    const previous = byPly.get(move.ply - 1);
-    const unpunished =
-      previous && !previous.isPlayerMove && (previous.classification === "mistake" || previous.classification === "blunder") && move.loss >= thresholds.inaccuracy
-        ? previous
-        : null;
-    if (isFlaggedMove(move) || unpunished) candidates.set(move.ply, { move, unpunished });
-  }
-
-  return [...candidates.values()]
-    .sort((a, b) => b.move.loss - a.move.loss)
-    .slice(0, MAX_KEY_MOMENTS)
-    .sort((a, b) => a.move.ply - b.move.ply);
 }
 
 function countBy<T extends string>(values: readonly T[]): Map<T, number> {
@@ -216,5 +191,6 @@ export function buildReportInput(
     `Coups autorisés (les seuls que tu peux citer) : ${[...allowedMoves].join(", ") || "aucun"}.`,
   );
 
-  return { text: lines.join("\n"), allowedMoves, allowedPlies };
+  const protectedPhrases = [opening.name, opening.gambit, opening.deviation?.lastBookName].filter((p): p is string => Boolean(p));
+  return { text: lines.join("\n"), allowedMoves, allowedPlies, protectedPhrases };
 }

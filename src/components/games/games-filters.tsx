@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useOptimistic, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useOptimistic, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,12 @@ export function GamesFilters({ filters }: { filters: GameFilters }) {
   const [pending, startTransition] = useTransition();
   // Valeurs affichées tout de suite, en attendant que la page filtrée arrive du serveur.
   const [shown, setShown] = useOptimistic<FilterValues>(filters);
+  // Valeurs affichées les plus récentes, lues par la recherche différée au moment où elle se déclenche
+  // (sinon un filtre changé pendant le délai serait annulé).
+  const latestShown = useRef(shown);
+  useEffect(() => {
+    latestShown.current = shown;
+  });
   const [query, setQuery] = useState(filters.q ?? "");
   // Dernière recherche reçue du serveur : resynchronise le champ après « Effacer » ou un retour arrière.
   const [syncedQuery, setSyncedQuery] = useState(filters.q ?? "");
@@ -46,7 +52,7 @@ export function GamesFilters({ filters }: { filters: GameFilters }) {
   }
 
   function apply(changes: Partial<FilterValues>) {
-    const next: FilterValues = { ...shown, ...changes };
+    const next: FilterValues = { ...latestShown.current, ...changes };
     startTransition(() => {
       setShown(next);
       // Tout changement de filtre repart de la première page.

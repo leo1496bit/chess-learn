@@ -105,7 +105,7 @@ export function invalidateExplanationCache(gameId: string): void {
 type SectionKey = keyof Pick<Explanation, "played" | "problem" | "opponentIdea" | "bestMove" | "lesson">;
 
 /** Intitulés selon le cadrage (écart ou bon coup) et l'auteur du coup. */
-function sectionsFor(flagged: boolean, byPlayer: boolean): { key: SectionKey; title: string }[] {
+function sectionsFor(flagged: boolean, byPlayer: boolean, isBest: boolean): { key: SectionKey; title: string }[] {
   return [
     { key: "played", title: byPlayer ? "Ce que j'ai joué" : "Ce que l'adversaire a joué" },
     { key: "problem", title: flagged ? "Pourquoi c'est problématique" : "Pourquoi c'est un bon coup" },
@@ -117,7 +117,7 @@ function sectionsFor(flagged: boolean, byPlayer: boolean): { key: SectionKey; ti
           : "Comment j'aurais pu en profiter"
         : "Ce que le coup menace ou empêche",
     },
-    { key: "bestMove", title: flagged ? "Le meilleur coup" : "Les autres candidats" },
+    { key: "bestMove", title: isBest ? "Les autres candidats" : "Le meilleur coup" },
     { key: "lesson", title: "La leçon à retenir" },
   ];
 }
@@ -259,7 +259,9 @@ function ExplanationBody({
   const { explanation, verified, cached } = data;
   const links = useMemo(() => indexMoveLinks(buildMoveLinks(move)), [move]);
   const flagged = isFlaggedMove(move);
-  const bestSan = flagged ? move.bestSan : null;
+  // Un bon coup peut ne pas être le meilleur : on montre alors le coup de Stockfish.
+  const isBest = move.classification === "forced" || move.bestUci === null || move.bestUci === move.uci;
+  const bestSan = isBest ? null : move.bestSan;
   return (
     <div className="space-y-4">
       <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
@@ -278,7 +280,7 @@ function ExplanationBody({
       ) : null}
 
       <dl className="divide-y border-l-2 border-primary/20">
-        {sectionsFor(flagged, move.isPlayerMove).map(({ key, title }) => (
+        {sectionsFor(flagged, move.isPlayerMove, isBest).map(({ key, title }) => (
           <div key={key} className="space-y-1 py-3 pl-4 first:pt-0 last:pb-0">
             <dt className="text-sm font-semibold text-primary">
               {title}

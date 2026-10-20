@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { analyzeGame, getEngine, isAbortError, type AnalyzeGameProgress, type AnalyzeGameResult } from "@/lib/engine";
 import { invalidateExplanationCache } from "@/components/ai/explanation-panel";
+import { invalidateReportCache } from "@/components/ai/game-report-panel";
 import type { Color, Thresholds } from "@/lib/analysis/types";
 
 export type AnalysisRunState =
@@ -55,6 +56,8 @@ export function useGameAnalysis(onDone: (result: AnalyzeGameResult) => void) {
       if (controller.signal.aborted) return;
       setState({ status: "idle" });
       if (result.staleExplanations.length > 0) invalidateExplanationCache(params.gameId);
+      // Toute nouvelle analyse rend le bilan existant périmé (empreinte analysis_created_at).
+      invalidateReportCache(params.gameId);
       onDoneRef.current(result);
     } catch (error) {
       if (isAbortError(error) || controller.signal.aborted) {

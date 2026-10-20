@@ -23,6 +23,11 @@ type State =
 // Bilans déjà chargés, par partie : revenir sur l'onglet ne relance pas de requête.
 const reportCache = new Map<string, GameReportResponse>();
 
+/** Oublie le bilan en cache côté client d'une partie (après une nouvelle analyse : il est peut-être périmé). */
+export function invalidateReportCache(gameId: string): void {
+  reportCache.delete(gameId);
+}
+
 /** Bilan de partie : diagnostic tactique, stratégique et théorique + plan de travail. */
 export function GameReportPanel({
   gameId,
@@ -66,12 +71,21 @@ export function GameReportPanel({
       .then(async (response) => {
         if (!active) return;
         if (response.status === 404) return setState({ kind: "empty" });
-        if (!response.ok) throw new Error(String(response.status));
+        if (!response.ok) {
+          setState({
+            kind: "error",
+            message: `Lecture du bilan impossible (erreur ${response.status}). Recharge la page ou réessaie.`,
+            previous: null,
+          });
+          return;
+        }
         const data = (await response.json()) as GameReportResponse;
         reportCache.set(gameId, data);
         setState({ kind: "ready", data });
       })
-      .catch(() => active && setState({ kind: "empty" }));
+      .catch(() => {
+        if (active) setState({ kind: "error", message: "Connexion au serveur impossible. Vérifie ta connexion puis réessaie.", previous: null });
+      });
     return () => {
       active = false;
     };

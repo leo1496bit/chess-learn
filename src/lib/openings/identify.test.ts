@@ -37,6 +37,20 @@ describe("identifyOpening (livre Lichess réel)", () => {
     expect(r.plies[3].inBook).toBe(false);
   });
 
+  it("ne nomme pas une position intermédiaire d'après une ligne plus profonde non jouée", () => {
+    // 4... e5 n'est la fin d'aucune ligne nommée : l'ouverture reste la dernière ligne atteinte.
+    const r = run("1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 e5 *");
+    expect(r.name).not.toContain("Dragon");
+    expect(r.family).toBe("Sicilian Defense");
+    expect(r.plies[6].name ?? "").not.toContain("Dragon");
+  });
+
+  it("n'annonce pas de gambit tant que la ligne du gambit n'est pas atteinte", () => {
+    // Le Grob Gambit demande 2. Bg2 ; ici les Blancs ont joué 2. h3.
+    const r = run("1. g4 d5 2. h3 *");
+    expect(r.gambit).toBeNull();
+  });
+
   it("reconnaît une transposition (compteurs de coups ignorés)", () => {
     expect(toEpd("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")).toBe(
       "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq -",

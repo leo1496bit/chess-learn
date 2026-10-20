@@ -101,6 +101,14 @@ export type GameContext = {
   theory?: MoveTheory;
 };
 
+/** Noms d'ouverture transmis à l'IA : ils peuvent contenir un SAN (« …, with Bf5 ») sans être des coups cités. */
+export function protectedPhrasesFor(game: GameContext): string[] {
+  const phrases = [game.openingName];
+  if (game.theory?.kind === "book") phrases.push(game.theory.name);
+  if (game.theory?.kind === "deviation") phrases.push(game.theory.lastBookName);
+  return phrases.filter((p): p is string => Boolean(p));
+}
+
 function theoryLine(theory: MoveTheory | undefined): string | null {
   if (!theory || theory.kind === "none") return null;
   if (theory.kind === "book") {
@@ -172,7 +180,7 @@ export function buildUserMessage(move: MoveAnalysis, game: GameContext): string 
   const opening = game.openingName ? `${game.openingName}${game.eco ? ` (${game.eco})` : ""}` : game.eco ?? "inconnue";
   const moveNumber = Math.ceil(move.ply / 2);
   const playedLabel = `${moveNumber}${color === "w" ? "." : "..."} ${move.san}`;
-  const allowed = [...allowedMovesFor(move)];
+  const allowed = [...allowedMovesFor(move, game.theory)];
 
   const candidates =
     move.candidates.length > 0

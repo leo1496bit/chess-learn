@@ -3,6 +3,7 @@
 // variantes transmises. Une case citée seule (« la case f7 ») n'est pas un coup.
 
 import type { MoveAnalysis } from "@/lib/analysis/types";
+import type { MoveTheory } from "@/lib/openings/identify";
 import type { Explanation } from "./schema";
 
 // Regex de la skill, avec `(?!\w)` en fin : `\b` après « + » ou « # » couperait le symbole.
@@ -35,7 +36,11 @@ export function normalizeSan(san: string): string {
 export const PROMPT_CANDIDATES = 3;
 
 /** Coups (SAN normalisé) qu'une explication de ce coup a le droit de citer. */
-export function allowedMovesFor(move: Pick<MoveAnalysis, "san" | "bestSan" | "candidates" | "punishLine">): Set<string> {
+export function allowedMovesFor(
+  move: Pick<MoveAnalysis, "san" | "bestSan" | "candidates" | "punishLine">,
+  /** Théorie transmise : le coup de sortie du livre (« hors théorie depuis 3. Be3 ») est cité dans le message. */
+  theory?: MoveTheory,
+): Set<string> {
   const allowed = new Set<string>();
   const add = (san: string | null | undefined) => {
     if (san) allowed.add(normalizeSan(san));
@@ -44,6 +49,7 @@ export function allowedMovesFor(move: Pick<MoveAnalysis, "san" | "bestSan" | "ca
   add(move.bestSan);
   for (const line of move.candidates.slice(0, PROMPT_CANDIDATES)) line.san.forEach(add);
   move.punishLine?.san.forEach(add);
+  if (theory?.kind === "out") add(theory.since.san);
   return allowed;
 }
 
@@ -91,7 +97,11 @@ export type VerificationResult = {
   referenced: string[];
 };
 
-export function verifyMoves(texts: string[], declared: string[], allowed: Set<string>): VerificationResult {
+/**
+ * `protectedPhrases` : textes transmis à l'IA qui peuvent contenir un SAN sans être des coups
+ * (noms d'ouverture comme « King's Indian Attack, with Bf5 ») ; retirés avant la recherche des coups.
+ */
+export function verifyMoves(texts: string[], declared: string[], allowed: Set<string>, protectedPhrases: readonly string[] = []): VerificationResult {
   const invalid = new Set<string>();
   const referenced = new Set<string>();
 
@@ -102,7 +112,8 @@ export function verifyMoves(texts: string[], declared: string[], allowed: Set<st
     if (!allowed.has(san)) invalid.add(raw.trim());
   };
 
-  for (const text of texts) {
+  for (const raw of texts) {
+    const text = stripPhrases(raw, protectedPhrases);
     extractSanTokens(text).forEach(check);
     for (const match of text.matchAll(FRENCH_PIECE_TOKEN)) invalid.add(match[0]);
   }
@@ -116,10 +127,17 @@ export function verifyMoves(texts: string[], declared: string[], allowed: Set<st
 }
 
 /** Vérifie une explication complète (5 rubriques + movesReferenced). */
-export function verifyExplanation(explanation: Explanation, allowed: Set<string>): VerificationResult {
+export function verifyExplanation(explanation: Explanation, allowed: Set<string>, protectedPhrases: readonly string[] = []): VerificationResult {
   return verifyMoves(
     [explanation.played, explanation.problem, explanation.opponentIdea, explanation.bestMove, explanation.lesson],
     explanation.movesReferenced,
     allowed,
+    protectedPhrases,
   );
+}
+
+function stripPhrases(text: string, phrases: readonly string[]): string {
+  let result = text;
+  for (const phrase of phrases) if (phrase) result = result.split(phrase).join(" ");
+  return result;
 }

@@ -100,19 +100,19 @@ Toujours distinguer `tactical` (tactics, hanging_piece, missed_tactic, king_safe
 
 - Convertir chaque PV UCI en SAN en rejouant les coups sur une instance `Chess(fen)`. **Arrêter la variante au premier coup illégal** et la tronquer (journaliser l'anomalie).
 - Limiter les variantes affichées/envoyées à 8 demi-coups.
-- Toute réponse de l'IA est vérifiée (la notation française interdite est C, F, T, D — pas R, qui est la tour en SAN anglais) : extraire les tokens SAN (`/\b(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?)\b/g`) et vérifier qu'ils appartiennent à l'ensemble autorisé (coup joué, meilleur coup, coups des PV transmises). Sinon : une nouvelle tentative avec rappel des coups autorisés, puis, si l'échec persiste, afficher l'explication avec un avertissement « non vérifiée » et ne pas la mettre en cache comme fiable.
+- Toute réponse de l'IA est vérifiée (la notation française interdite est C, F, T, D — pas R, qui est la tour en SAN anglais) : extraire les tokens SAN (`/\b(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?)\b/g`) et vérifier qu'ils appartiennent à l'ensemble autorisé (coup joué, meilleur coup, coups des PV transmises). Les données de théorie transmises comptent : le coup de sortie du livre (« hors théorie depuis 3. Be3 ») est autorisé, et les **noms d'ouverture transmis** sont retirés du texte avant la recherche des coups (des noms Lichess contiennent un coup : « King's Indian Attack, with Bf5 »). Sinon : une nouvelle tentative avec rappel des coups autorisés, puis, si l'échec persiste, afficher l'explication avec un avertissement « non vérifiée » et ne pas la mettre en cache comme fiable.
 
 ## 7. Explications avec Claude Haiku 5.5
 
 - Serveur uniquement (`src/lib/ai/`, route `POST /api/explanations`), `@anthropic-ai/sdk`, modèle **`claude-haiku-5-5`**, clé `ANTHROPIC_API_KEY` lue côté serveur. Jamais de `NEXT_PUBLIC_` pour une clé.
 - Déclenchées **à la demande** (bouton « Expliquer ce coup »), pour **tous les coups** analysés, du joueur comme de l'adversaire — jamais en lot automatique sur toute une partie. Le cadrage dépend du coup (`isFlaggedMove`) : « Écart » (imprécision, erreur, gaffe, gain manqué) → en quoi c'est mauvais ; « Bon coup » → en quoi c'est bon, ce qu'il menace ou empêche (`errorType: "none"`).
-- Le serveur ajoute la place du coup dans la théorie (`theoryForPly`, §11) : coup du livre (nom exact), sortie de théorie, ou coup joué après la sortie (« hors théorie depuis 3. Be3 »). L'IA ne nomme une ouverture que si elle est fournie.
-- Appel : `client.messages.parse({ model: "claude-haiku-5-5", max_tokens: 2500, output_config: { effort: "low", format: zodOutputFormat(ExplanationSchema) }, system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }], messages: [...] })`. Pas de `temperature`, pas de `budget_tokens`, pas de prefill (refusés par Haiku 5.5). Vérifier `stop_reason` (`refusal`, `max_tokens`) avant `parsed_output`. Erreurs SDK typées (`Anthropic.RateLimitError`, `APIConnectionTimeoutError`, `APIError`), timeout 30 s, `maxRetries: 2`.
+- Le serveur ajoute le nom d'ouverture **du livre** (jamais celui de Chess.com) et la place du coup dans la théorie (`theoryForPly`, §11) : coup du livre (nom exact), sortie de théorie, ou coup joué après la sortie (« hors théorie depuis 3. Be3 »). L'IA ne nomme une ouverture que si elle est fournie.
+- Appel (`callStructured`, `src/lib/ai/call.ts`) : `client.messages.create({ model: "claude-haiku-5-5", max_tokens: 2500, output_config: { effort: "low", format: zodOutputFormat(ExplanationSchema) }, system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }], messages: [...] })`, puis `format.parse()` sur le texte : contrairement à `messages.parse`, une réponse tronquée ne lève pas d'exception et son usage est quand même enregistré dans `ai_usage`. Pas de `temperature`, pas de `budget_tokens`, pas de prefill (refusés par Haiku 5.5). Vérifier `stop_reason` (`refusal`, `max_tokens`) avant de lire la réponse. Erreurs SDK typées (`Anthropic.RateLimitError`, `APIConnectionTimeoutError`, `APIError`), timeout 30 s, `maxRetries: 2`.
 - **Données transmises (et rien d'autre)** : FEN avant le coup, liste des pièces par camp, camp du joueur, coup joué (SAN), meilleur coup (SAN), 3 coups candidats avec évaluation et PV SAN (≤ 8 demi-coups), PV punitive après le coup joué, évaluations avant/après (texte + win %), perte, classification, phase, thèmes, numéro du coup, ouverture si connue.
 - **Sortie (schéma Zod)** :
   ```ts
   { played: string; problem: string; opponentIdea: string; bestMove: string; lesson: string;
-    errorType: "tactical" | "strategic" | "mixed" | "uncertain"; confidence: "high" | "medium" | "low";
+    errorType: "none" | "tactical" | "strategic" | "mixed" | "uncertain"; confidence: "high" | "medium" | "low";
     movesReferenced: string[] }
   ```
   correspondant aux 5 rubriques du cahier des charges (Ce que j'ai joué / Pourquoi c'est problématique / Ce que l'adversaire pouvait faire / Le meilleur coup / La leçon à retenir). Texte en français, concret, sans formule vague.
@@ -140,6 +140,7 @@ Calculées uniquement à partir des parties importées et analysées. Afficher �
 ## 11. Ouvertures et théorie
 
 - Livre : données Lichess `lichess-org/chess-openings` (CC0) dans `data/openings/*.tsv`, compilées par `npm run build:openings` en `src/lib/openings/book.json` (≈ 1 Mo), indexé par **EPD** (FEN sans compteurs : reconnaît les transpositions). Chargé **uniquement côté serveur** (`src/lib/openings/book.ts`, `server-only`).
+- Une position intermédiaire (où aucune ligne nommée ne s'arrête) porte le nom de la **dernière ligne nommée atteinte** sur son chemin, jamais celui d'une ligne plus profonde non jouée : sinon on annoncerait un « Dragon » ou un gambit qui n'a pas eu lieu.
 - `identifyOpening(fens, sans, playerColor, book)` (pur, `src/lib/openings/identify.ts`) : nom le plus précis atteint, famille / variante, gambit éventuel (nom contenant « Gambit »), nombre de demi-coups théoriques consécutifs, **sortie de théorie** (demi-coup, coup, camp, joueur ou adversaire, dernière ligne connue), et statut de chaque demi-coup.
 - Ne jamais nommer une ouverture, un gambit ou un piège qui ne vient pas du livre.
 

@@ -4,7 +4,7 @@ import type { MoveAnalysis } from "@/lib/analysis/types";
 import { AiError, callStructured, toAiError, type AttemptResult, type MessagesClient } from "./call";
 import { checkLimits, type AiLimitSettings } from "./limits";
 import { EMPTY_USAGE, estimateCost } from "./pricing";
-import { SYSTEM_PROMPT, buildRetryReminder, buildUserMessage, type GameContext } from "./prompt";
+import { SYSTEM_PROMPT, buildRetryReminder, buildUserMessage, protectedPhrasesFor, type GameContext } from "./prompt";
 import { ExplanationSchema, type Explanation, type ExplanationResponse } from "./schema";
 import type { ExplanationStore, UsageStatus } from "./store";
 import { allowedMovesFor, verifyExplanation } from "./verify";
@@ -49,7 +49,8 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
   };
   ensureAllowed();
 
-  const allowed = allowedMovesFor(move);
+  const allowed = allowedMovesFor(move, game.theory);
+  const phrases = protectedPhrasesFor(game);
   const baseMessage = buildUserMessage(move, game);
 
   const attempt = async (userMessage: string): Promise<AttemptResult<Explanation>> => {
@@ -76,7 +77,7 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
       status = "error";
       errorText = `sortie invalide : ${result.detail}`;
     } else {
-      const check = verifyExplanation(result.value, allowed);
+      const check = verifyExplanation(result.value, allowed, phrases);
       if (!check.valid) {
         status = "unverified";
         errorText = `coups non fournis : ${check.invalid.join(", ")}`;
@@ -99,7 +100,7 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
   }
 
   let explanation: Explanation | null = first.kind === "parsed" ? first.value : null;
-  const invalidMoves = explanation ? verifyExplanation(explanation, allowed).invalid : [];
+  const invalidMoves = explanation ? verifyExplanation(explanation, allowed, phrases).invalid : [];
   let verified = explanation !== null && invalidMoves.length === 0;
 
   if (!verified) {
@@ -112,7 +113,7 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
     }
     const second = await attempt(baseMessage + "\n" + buildRetryReminder(invalidMoves, allowed));
     if (second.kind === "parsed") {
-      const check = verifyExplanation(second.value, allowed);
+      const check = verifyExplanation(second.value, allowed, phrases);
       if (check.valid || explanation === null) {
         explanation = second.value;
         verified = check.valid;

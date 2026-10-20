@@ -2,7 +2,10 @@
 // Module pur : le livre est passé en paramètre (chargé côté serveur par ./book.ts).
 import type { Color } from "@/lib/analysis/types";
 
-/** epd -> [eco, nom, exact] ; exact = 1 si une ligne nommée s'arrête sur cette position. */
+/**
+ * epd -> [eco, nom, exact] ; exact = 1 si une ligne nommée s'arrête sur cette position. Sinon, le nom
+ * est celui de la dernière ligne nommée atteinte sur le chemin (vide s'il n'y en a pas encore).
+ */
 export type OpeningBook = Record<string, [string, string, number]>;
 
 export type PlyOpening = {
@@ -73,14 +76,18 @@ export function identifyOpening(
   for (let i = 1; i < fens.length; i++) {
     const entry = book[toEpd(fens[i])];
     const color: Color = i % 2 === 1 ? "w" : "b";
-    plies.push({ ply: i, inBook: Boolean(entry), eco: entry?.[0] ?? null, name: entry?.[1] ?? null });
+    // Nom vide : position théorique avant toute ligne nommée atteinte.
+    const entryName = entry?.[1] || null;
+    plies.push({ ply: i, inBook: Boolean(entry), eco: entry?.[0] || null, name: entryName });
 
     if (stillInBook && entry) {
       bookPlies = i;
-      eco = entry[0];
-      name = entry[1];
-      lastName = entry[1];
-      if (/gambit/i.test(entry[1])) gambit = entry[1];
+      if (entryName) {
+        eco = entry[0];
+        name = entryName;
+        lastName = entryName;
+        if (/gambit/i.test(entryName)) gambit = entryName;
+      }
     } else if (stillInBook) {
       stillInBook = false;
       deviation = { ply: i, color, san: sans[i - 1] ?? "", byPlayer: color === playerColor, lastBookName: lastName };

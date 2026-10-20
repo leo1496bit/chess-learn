@@ -5,7 +5,7 @@ import { Chess } from "chess.js";
 import { playUci } from "@/lib/analysis/lines";
 import type { MoveAnalysis, Thresholds, ValidatedLine } from "@/lib/analysis/types";
 import { isFlaggedMove } from "./eligibility";
-import { selectKeyMoments } from "./report/input";
+import { selectKeyMoments } from "./report/moments";
 import { normalizeSan } from "./verify";
 
 export type MoveLink = {

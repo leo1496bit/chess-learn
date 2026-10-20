@@ -33,9 +33,14 @@ export function reportPlies(report: GameReport): number[] {
   ];
 }
 
-export function verifyReport(report: GameReport, allowedMoves: Set<string>, allowedPlies: Set<number>): ReportVerification {
+export function verifyReport(
+  report: GameReport,
+  allowedMoves: Set<string>,
+  allowedPlies: Set<number>,
+  protectedPhrases: readonly string[] = [],
+): ReportVerification {
   // Seuls les coups réellement écrits dans le texte comptent (pas de liste déclarée à recopier).
-  const moves = verifyMoves(reportTexts(report), [], allowedMoves);
+  const moves = verifyMoves(reportTexts(report), [], allowedMoves, protectedPhrases);
   const invalidPlies = [...new Set(reportPlies(report).filter((ply) => !allowedPlies.has(ply)))];
   return { valid: moves.valid && invalidPlies.length === 0, invalidMoves: moves.invalid, invalidPlies };
 }
