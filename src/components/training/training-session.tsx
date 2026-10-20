@@ -6,17 +6,16 @@ import { useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { ARROW_COLORS, ChessBoard, type BoardArrow } from "@/components/chess/chess-board";
 import { Button } from "@/components/ui/button";
-import { evaluateCandidateMove } from "@/lib/analysis/game";
 import { parseUci, playUci, uciLineToSan } from "@/lib/analysis/lines";
-import type { Thresholds } from "@/lib/analysis/types";
 import { analyzePositionCached } from "@/lib/engine";
 import { formatDate } from "@/lib/stats/format";
 import { PHASE_LABELS, THEME_LABELS } from "@/lib/stats/labels";
 import type { TrainingExercise } from "@/lib/training/queries";
-import { ACCEPTED_LOSS, DIFFICULTY_LABELS } from "@/lib/training/select";
+import { DIFFICULTY_LABELS } from "@/lib/training/select";
+import type { Verdict } from "@/lib/training/attempt";
 import { cn } from "@/lib/utils";
 
-type Verdict = "good" | "inaccurate" | "error";
+type AttemptResponse = { correct: boolean; verdict: Verdict; loss: number; answerSan: string; bestSan: string | null };
 
 type Answer = {
   uci: string;
@@ -46,12 +45,10 @@ export function TrainingSession({
   exercises,
   depth,
   multipv,
-  thresholds,
 }: {
   exercises: TrainingExercise[];
   depth: number;
   multipv: number;
-  thresholds: Thresholds;
 }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -136,27 +133,26 @@ export function TrainingSession({
   async function evaluate(ex: TrainingExercise, uci: string, san: string, fenAfter: string) {
     const current = ++run.current;
     try {
-      // Jugement par Stockfish uniquement : position avant (cache de l'analyse de la partie) et après le coup.
-      const before = await analyzePositionCached(ex.fen, { depth, multipv });
-      const after = await analyzePositionCached(fenAfter, { depth, multipv: 1 });
+      // Jugement par Stockfish uniquement. Les analyses (avant et après le coup) sont écrites dans le
+      // cache avant l'envoi : le serveur les relit et calcule lui-même le verdict.
+      await analyzePositionCached(ex.fen, { depth, multipv, awaitStore: true });
+      await analyzePositionCached(fenAfter, { depth, multipv: 1, awaitStore: true });
       if (current !== run.current) return;
-      const result = evaluateCandidateMove(ex.fen, uci, before, after, thresholds);
-      if (!result) throw new Error("Le coup n'a pas pu être rejoué dans la position.");
-      const correct = ex.acceptedUci.includes(uci) || result.loss < ACCEPTED_LOSS;
-      const verdict: Verdict = correct ? "good" : result.loss < thresholds.mistake ? "inaccurate" : "error";
-      const loss = Math.round(result.loss * 100) / 100;
-      setAnswer({ uci, san, loss, verdict, engineBestSan: result.bestSan, save: "pending" });
-      setStatus({ kind: "answered" });
-      setTally((t) => ({ done: t.done + 1, good: t.good + (correct ? 1 : 0) }));
 
       const response = await fetch("/api/training/attempt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exerciseId: ex.id, answerUci: uci, correct, loss }),
+        body: JSON.stringify({ exerciseId: ex.id, answerUci: uci }),
       });
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      const body = (await response.json().catch(() => ({}))) as Partial<AttemptResponse> & { error?: string };
       if (current !== run.current) return;
-      setAnswer((a) => (a ? { ...a, save: response.ok ? "saved" : { error: body.error ?? `Erreur ${response.status}` } } : a));
+      if (!response.ok || body.verdict === undefined || body.loss === undefined) {
+        throw new Error(body.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`);
+      }
+      const correct = body.correct === true;
+      setAnswer({ uci, san, loss: body.loss, verdict: body.verdict, engineBestSan: body.bestSan ?? null, save: "saved" });
+      setStatus({ kind: "answered" });
+      setTally((t) => ({ done: t.done + 1, good: t.good + (correct ? 1 : 0) }));
     } catch (error) {
       if (current !== run.current) return;
       setStatus({

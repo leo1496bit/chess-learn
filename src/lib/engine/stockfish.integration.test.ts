@@ -26,6 +26,7 @@ describe("Stockfish WASM (Node)", () => {
     expect(r.lines[0].pvUci[0]).toBe("h5f7");
     expect(r.lines[0].evaluation).toEqual({ cp: null, mate: 1 });
     expect(r.lines.every((l) => l.depth === r.lines[0].depth)).toBe(true);
+    expect(r.partial).toBeUndefined();
     expect(validateLine(fen, r.lines[0]).san[0]).toBe("Qxf7#");
   }, 60_000);
 
@@ -41,5 +42,6 @@ describe("Stockfish WASM (Node)", () => {
     expect(r.lines).toHaveLength(3);
     expect(Math.abs(r.lines[0].evaluation.cp ?? 999)).toBeLessThan(100);
     expect(r.lines.map((l) => l.multipv)).toEqual([1, 2, 3]);
+    expect(r.partial).toBeUndefined();
   }, 60_000);
 });

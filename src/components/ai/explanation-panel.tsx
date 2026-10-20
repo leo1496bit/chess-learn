@@ -51,6 +51,55 @@ async function rememberExplanation(gameId: string, ply: number, data: Explanatio
   map.set(ply, { ply, explanation: data.explanation, verified: data.verified, createdAt: new Date().toISOString() });
 }
 
+type Outcome =
+  | { ok: true; data: Loaded }
+  | { ok: false; message: string; code?: ApiErrorBody["code"] };
+
+// Requêtes de génération en cours, par « gameId:ply » : quitter le coup puis y revenir ne relance
+// pas un appel payant, le panneau se rebranche sur la requête existante.
+const inFlight = new Map<string, Promise<Outcome>>();
+
+function requestExplanation(gameId: string, ply: number): Promise<Outcome> {
+  const key = `${gameId}:${ply}`;
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const pending = (async (): Promise<Outcome> => {
+    try {
+      const response = await fetch("/api/explanations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId, ply }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const error = (body ?? {}) as Partial<ApiErrorBody>;
+        return {
+          ok: false,
+          message: error.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`,
+          code: error.code,
+        };
+      }
+      const data = body as ExplanationResponse;
+      await rememberExplanation(gameId, ply, data);
+      return { ok: true, data: { explanation: data.explanation, verified: data.verified, cached: data.cached } };
+    } catch {
+      return { ok: false, message: "Connexion au serveur impossible. Vérifie ta connexion puis réessaie." };
+    } finally {
+      inFlight.delete(key);
+    }
+  })();
+  inFlight.set(key, pending);
+  return pending;
+}
+
+/** Oublie les explications en cache côté client d'une partie (après une nouvelle analyse). */
+export function invalidateExplanationCache(gameId: string): void {
+  gameCache.delete(gameId);
+  for (const key of inFlight.keys()) {
+    if (key.startsWith(`${gameId}:`)) inFlight.delete(key);
+  }
+}
+
 const SECTIONS: { key: keyof Pick<Explanation, "played" | "problem" | "opponentIdea" | "bestMove" | "lesson">; title: string }[] = [
   { key: "played", title: "Ce que j'ai joué" },
   { key: "problem", title: "Pourquoi c'est problématique" },
@@ -64,13 +113,31 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
   const key = `${gameId}:${move.ply}`;
   // L'état est rattaché au coup affiché : changer de coup repart de « chargement du cache ».
   const [entry, setEntry] = useState<{ key: string; state: State } | null>(null);
-  const state: State = entry?.key === key ? entry.state : { kind: "loading-cache" };
+  // Sans état propre au coup : une génération lancée plus tôt et toujours en cours s'affiche comme telle.
+  const state: State =
+    entry?.key === key ? entry.state : inFlight.has(key) ? { kind: "generating", previous: null } : { kind: "loading-cache" };
   const currentKey = useRef(key);
 
   useEffect(() => {
     currentKey.current = key;
     if (!explainable) return;
     let active = true;
+    const running = inFlight.get(key);
+    if (running) {
+      // Une génération lancée plus tôt pour ce coup est toujours en cours : on attend son résultat.
+      running.then((outcome) => {
+        if (!active) return;
+        setEntry({
+          key,
+          state: outcome.ok
+            ? { kind: "ready", data: outcome.data }
+            : { kind: "error", message: outcome.message, code: outcome.code, previous: null },
+        });
+      });
+      return () => {
+        active = false;
+      };
+    }
     loadGameCache(gameId).then((map) => {
       if (!active) return;
       const hit = map.get(move.ply);
@@ -101,29 +168,12 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
       if (currentKey.current === requestKey) setEntry({ key: requestKey, state: next });
     };
     setState({ kind: "generating", previous });
-    try {
-      const response = await fetch("/api/explanations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameId, ply: move.ply }),
-      });
-      const body: unknown = await response.json().catch(() => null);
-      if (!response.ok) {
-        const error = (body ?? {}) as Partial<ApiErrorBody>;
-        setState({
-          kind: "error",
-          message: error.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`,
-          code: error.code,
-          previous,
-        });
-        return;
-      }
-      const data = body as ExplanationResponse;
-      await rememberExplanation(gameId, move.ply, data);
-      setState({ kind: "ready", data: { explanation: data.explanation, verified: data.verified, cached: data.cached } });
-    } catch {
-      setState({ kind: "error", message: "Connexion au serveur impossible. Vérifie ta connexion puis réessaie.", previous });
-    }
+    const outcome = await requestExplanation(gameId, move.ply);
+    setState(
+      outcome.ok
+        ? { kind: "ready", data: outcome.data }
+        : { kind: "error", message: outcome.message, code: outcome.code, previous },
+    );
   }
 
   return (

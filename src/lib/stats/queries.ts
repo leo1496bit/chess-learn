@@ -90,7 +90,7 @@ function toRecentGame(row: GameRow): RecentGame {
 /** Toutes les parties d'échecs standard importées (les variantes sont exclues des statistiques). */
 export async function loadStatsGames(supabase: SupabaseServerClient): Promise<StatsGame[]> {
   const rows = await fetchAllPages<GameRow>("des parties", (from, to) =>
-    supabase.from("games").select(GAME_COLUMNS).eq("rules", "chess").order("end_time", { ascending: false }).range(from, to),
+    supabase.from("games").select(GAME_COLUMNS).eq("rules", "chess").order("end_time", { ascending: false }).order("id").range(from, to),
   );
   return rows.map(toStatsGame);
 }
@@ -131,6 +131,7 @@ export async function loadAttempts(supabase: SupabaseServerClient): Promise<Stat
       .from("exercise_attempts")
       .select("id, exercise_id, correct, created_at, exercises(themes)")
       .order("created_at")
+      .order("id")
       .range(from, to),
   );
   return rows.map((r) => ({

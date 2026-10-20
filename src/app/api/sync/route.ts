@@ -58,7 +58,6 @@ export async function POST(request: Request) {
     if (error instanceof SyncAccountError) return errorResponse(404, error.message);
     if (error instanceof ChesscomError) return errorResponse(502, error.message);
     console.error("[sync]", error);
-    const message = error instanceof Error ? error.message : "Erreur inconnue";
-    return errorResponse(500, `La synchronisation a échoué : ${message}`);
+    return errorResponse(500, "La synchronisation a échoué. Réessaie dans un instant ; les parties déjà importées sont conservées.");
   }
 }

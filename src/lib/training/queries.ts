@@ -11,7 +11,7 @@ const SolutionLineSchema = z.array(z.object({ uci: z.string(), san: z.string() }
 
 const UPSERT_CHUNK = 200;
 
-export type GenerateResult = { scanned: number; generated: number; skipped: number };
+export type GenerateResult = { scanned: number; generated: number; skipped: number; removed: number };
 
 /**
  * Génère (ou rafraîchit) les exercices à partir des coups analysés du joueur.
@@ -51,7 +51,19 @@ export async function generateExercises(supabase: SupabaseServerClient): Promise
     if (error) throw new Error(`Enregistrement des exercices impossible : ${error.message}`);
   }
 
-  return { scanned: rows.length, generated: drafts.length, skipped: rows.length - drafts.length };
+  // Exercices dont le coup source n'en produit plus (nouvelle analyse, autres seuils) : supprimés
+  // avec leurs tentatives (cascade).
+  const kept = new Set(drafts.map((d) => d.source_move_id));
+  const existing = await fetchAllPages("des exercices existants", (from, to) =>
+    supabase.from("exercises").select("id, source_move_id").order("id").range(from, to),
+  );
+  const orphans = existing.filter((e) => !kept.has(e.source_move_id)).map((e) => e.id);
+  for (let i = 0; i < orphans.length; i += UPSERT_CHUNK) {
+    const { error } = await supabase.from("exercises").delete().in("id", orphans.slice(i, i + UPSERT_CHUNK));
+    if (error) throw new Error(`Suppression des exercices obsolètes impossible : ${error.message}`);
+  }
+
+  return { scanned: rows.length, generated: drafts.length, skipped: rows.length - drafts.length, removed: orphans.length };
 }
 
 export type TrainingExercise = QueueExercise & {
@@ -77,6 +89,7 @@ export async function loadExercises(supabase: SupabaseServerClient): Promise<Tra
         "id, game_id, fen, side_to_move, played_uci, solution_uci, solution_san, solution_line, accepted_uci, themes, phase, difficulty, created_at, due_at, interval_days, attempts, successes, last_result, games(white, black, end_time, chesscom_url)",
       )
       .order("created_at")
+      .order("id")
       .range(from, to),
   );
   return rows.map((r) => {

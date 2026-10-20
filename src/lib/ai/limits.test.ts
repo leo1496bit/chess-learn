@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { checkLimits, startOfPeriod, summarizeUsage, type UsageRow } from "./limits";
+import { checkLimits, combineUsageTotals, startOfPeriod, type UsageTotals } from "./limits";
 
-const row = (created_at: string, cost_usd: number, status = "ok"): UsageRow => ({
-  created_at,
-  status,
-  input_tokens: 1000,
-  output_tokens: 500,
-  cache_read_tokens: 800,
-  cache_write_tokens: 0,
+const totals = (calls: number, cost_usd: number): UsageTotals => ({
+  calls,
   cost_usd,
+  input_tokens: calls * 1000,
+  output_tokens: calls * 500,
+  cache_read_tokens: calls * 800,
+  cache_write_tokens: calls * 100,
 });
 
 describe("startOfPeriod (Europe/Paris)", () => {
@@ -30,30 +29,21 @@ describe("startOfPeriod (Europe/Paris)", () => {
   });
 });
 
-describe("summarizeUsage", () => {
-  const now = new Date("2026-10-20T12:00:00Z");
-
-  it("compte les appels du jour et du mois, erreurs comprises", () => {
-    const summary = summarizeUsage(
-      [
-        row("2026-10-20T08:00:00Z", 0.001),
-        row("2026-10-20T07:00:00Z", 0, "error"),
-        row("2026-10-19T21:59:00Z", 0.002), // 23 h 59 à Paris le 19
-        row("2026-10-02T10:00:00Z", 0.003),
-        row("2026-09-30T21:00:00Z", 0.5), // 23 h à Paris le 30 septembre : hors mois
-      ],
-      now,
-    );
+describe("combineUsageTotals", () => {
+  it("combine les totaux du jour et du mois", () => {
+    const summary = combineUsageTotals(totals(2, 0.001), totals(4, 0.0060000004));
     expect(summary.callsToday).toBe(2);
     expect(summary.callsMonth).toBe(4);
     expect(summary.costToday).toBeCloseTo(0.001, 6);
-    expect(summary.costMonth).toBeCloseTo(0.006, 6);
+    expect(summary.costMonth).toBe(0.006);
+    expect(summary.inputTokensMonth).toBe(4400);
     expect(summary.outputTokensMonth).toBe(2000);
     expect(summary.cacheReadTokensMonth).toBe(3200);
   });
 
-  it("vaut zéro sans ligne", () => {
-    expect(summarizeUsage([], now).callsMonth).toBe(0);
+  it("accepte les numeric renvoyés en chaîne par PostgREST", () => {
+    const month = { ...totals(1, 0), cost_usd: "0.25" as unknown as number };
+    expect(combineUsageTotals(totals(0, 0), month).costMonth).toBe(0.25);
   });
 });
 

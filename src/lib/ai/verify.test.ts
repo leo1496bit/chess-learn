@@ -78,3 +78,18 @@ describe("verifyMoves", () => {
     expect(verifyMoves(["e8=R"], [], castle).valid).toBe(false);
   });
 });
+
+describe("allowedMovesFor — candidats transmis", () => {
+  it("n'autorise que les coups des candidats envoyés dans le prompt", () => {
+    const line = (san: string[]) => ({ evaluation: { cp: 0, mate: null }, uci: [], san });
+    const allowed = allowedMovesFor({
+      san: "e4",
+      bestSan: "d4",
+      punishLine: null,
+      candidates: [line(["d4"]), line(["c4"]), line(["Nf3"]), line(["g3"]), line(["b3"])],
+    });
+    expect(allowed.has("Nf3")).toBe(true);
+    expect(allowed.has("g3")).toBe(false);
+    expect(allowed.has("b3")).toBe(false);
+  });
+});

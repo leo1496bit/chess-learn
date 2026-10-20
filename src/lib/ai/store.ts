@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseServerClient } from "@/lib/db/server";
-import { summarizeUsage, startOfPeriod, type UsageRow, type UsageSummary } from "./limits";
+import { combineUsageTotals, startOfPeriod, type UsageTotals, type UsageSummary } from "./limits";
 import { AI_MODEL } from "./pricing";
 import { PROMPT_VERSION } from "./prompt";
 import { ExplanationSchema, type CachedExplanation, type Explanation } from "./schema";
@@ -27,15 +27,28 @@ export interface ExplanationStore {
 
 const USAGE_COLUMNS = "created_at, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd";
 
-/** Lignes ai_usage du mois en cours (la RLS limite à l'utilisateur connecté). */
-export async function loadMonthUsage(supabase: SupabaseServerClient, now: Date): Promise<UsageRow[]> {
-  const { data, error } = await supabase
-    .from("ai_usage")
-    .select(USAGE_COLUMNS)
-    .gte("created_at", startOfPeriod(now, "month").toISOString())
-    .order("created_at", { ascending: false });
+const EMPTY_TOTALS: UsageTotals = {
+  calls: 0,
+  cost_usd: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_tokens: 0,
+  cache_write_tokens: 0,
+};
+
+async function loadTotals(supabase: SupabaseServerClient, since: Date): Promise<UsageTotals> {
+  const { data, error } = await supabase.rpc("ai_usage_summary", { since: since.toISOString() });
   if (error) throw new Error(`Lecture de la consommation IA impossible : ${error.message}`);
-  return data;
+  return data[0] ?? EMPTY_TOTALS;
+}
+
+/** Consommation du jour et du mois, agrégée en SQL (pas de limite de lignes ; la RLS s'applique). */
+export async function loadUsageSummary(supabase: SupabaseServerClient, now: Date): Promise<UsageSummary> {
+  const [day, month] = await Promise.all([
+    loadTotals(supabase, startOfPeriod(now, "day")),
+    loadTotals(supabase, startOfPeriod(now, "month")),
+  ]);
+  return combineUsageTotals(day, month);
 }
 
 export async function loadRecentUsage(supabase: SupabaseServerClient, limit = 20) {
@@ -91,14 +104,16 @@ export function createSupabaseExplanationStore(supabase: SupabaseServerClient): 
     },
 
     async usageSummary(now) {
-      return summarizeUsage(await loadMonthUsage(supabase, now), now);
+      return loadUsageSummary(supabase, now);
     },
 
     async saveExplanation(gameId, ply, explanation, verified) {
       // L'index unique est partiel (game_id non nul) : PostgREST ne sait pas l'utiliser en upsert.
+      const update = (id: number) =>
+        supabase.from("explanations").update({ content: explanation, verified }).eq("id", id);
       const existing = await findRow(gameId, ply);
-      const { error } = existing
-        ? await supabase.from("explanations").update({ content: explanation, verified }).eq("id", existing.id)
+      let { error } = existing
+        ? await update(existing.id)
         : await supabase.from("explanations").insert({
             game_id: gameId,
             ply,
@@ -107,6 +122,11 @@ export function createSupabaseExplanationStore(supabase: SupabaseServerClient): 
             content: explanation,
             verified,
           });
+      // Requête concurrente pour le même coup : la ligne vient d'être créée, on la met à jour.
+      if (error?.code === "23505") {
+        const created = await findRow(gameId, ply);
+        error = created ? (await update(created.id)).error : error;
+      }
       if (error) throw new Error(`Enregistrement de l'explication impossible : ${error.message}`);
     },
 

@@ -187,6 +187,9 @@ export class UciEngine implements StockfishEngine {
 
     const lines = collector.result();
     if (lines.length === 0) throw new EngineError("no-result", fen);
-    return { fen, depth, multipv, engineVersion: this.engineVersion, lines };
+    const analysis: PositionAnalysis = { fen, depth, multipv, engineVersion: this.engineVersion, lines };
+    // Timeout avant la profondeur demandée : résultat marqué partiel, jamais mis en cache.
+    if (collector.completedDepth < depth) analysis.partial = true;
+    return analysis;
   }
 }

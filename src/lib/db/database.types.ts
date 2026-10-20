@@ -553,6 +553,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ai_usage_summary: {
+        Args: { since: string }
+        Returns: {
+          calls: number
+          cost_usd: number
+          input_tokens: number
+          output_tokens: number
+          cache_read_tokens: number
+          cache_write_tokens: number
+        }[]
+      }
       is_owner: { Args: never; Returns: boolean }
     }
     Enums: {

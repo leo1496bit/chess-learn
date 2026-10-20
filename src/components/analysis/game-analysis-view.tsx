@@ -6,6 +6,7 @@ import { ChessBoard, ARROW_COLORS, type BoardArrow } from "@/components/chess/ch
 import { EvalBar } from "@/components/chess/eval-bar";
 import { MoveList, type MoveListItem } from "@/components/chess/move-list";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { isErrorClassification } from "@/lib/analysis/classify";
 import { extractPositions } from "@/lib/analysis/game";
 import type { Color, EngineSettings, GameAnalysisSummary, MoveAnalysis, Thresholds } from "@/lib/analysis/types";
@@ -65,11 +66,14 @@ export function GameAnalysisView({
   );
   const [ply, setPly] = useState(0);
   const [orientation, setOrientation] = useState<"white" | "black">(game.playerColor === "w" ? "white" : "black");
-  const [status, setStatus] = useState(game.analysisStatus);
 
   const { state, start, cancel } = useGameAnalysis((result) => {
-    setAnalysis({ ...result, settings: engineSettings });
-    setStatus("done");
+    setAnalysis({ moves: result.moves, summary: result.summary, settings: engineSettings });
+    if (result.partialPositions > 0) {
+      toast.warning(
+        `${result.partialPositions} position${result.partialPositions > 1 ? "s ont" : " a"} été analysée${result.partialPositions > 1 ? "s" : ""} moins profondément (délai dépassé). Relance l'analyse pour les recalculer.`,
+      );
+    }
   });
 
   const fens = parsed.ok ? parsed.fens : [];
@@ -130,7 +134,6 @@ export function GameAnalysisView({
       depth: engineSettings.depth,
       multipv: engineSettings.multipv,
       thresholds,
-      previousStatus: analysis ? "done" : status === "running" ? "none" : status,
     });
 
   return (

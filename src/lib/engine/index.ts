@@ -26,13 +26,20 @@ export function getEngine(): StockfishEngine {
  */
 export async function analyzePositionCached(
   fen: string,
-  opts: { depth: number; multipv: number; timeoutMs?: number; signal?: AbortSignal },
+  opts: {
+    depth: number;
+    multipv: number;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    /** Attendre l'écriture du cache (et propager son échec) : nécessaire quand le serveur relit l'analyse. */
+    awaitStore?: boolean;
+  },
 ): Promise<PositionAnalysis> {
   const terminal = terminalAnalysis(fen, opts.depth, opts.multipv);
   if (terminal) return terminal;
 
   const key = { depth: opts.depth, multipv: opts.multipv };
-  const engineOpts: AnalyzeOptions = opts;
+  const engineOpts: AnalyzeOptions = { depth: opts.depth, multipv: opts.multipv, timeoutMs: opts.timeoutMs, signal: opts.signal };
   let cached: PositionAnalysis | undefined;
   try {
     cached = (await loadCachedAnalyses([fen], key)).get(fen);
@@ -42,6 +49,10 @@ export async function analyzePositionCached(
   if (cached) return cached;
 
   const analysis = await getEngine().analyze(fen, engineOpts);
-  storeAnalysis(analysis).catch((error: unknown) => console.warn("[engine] Écriture du cache impossible", error));
+  if (opts.awaitStore) {
+    await storeAnalysis(analysis);
+  } else {
+    storeAnalysis(analysis).catch((error: unknown) => console.warn("[engine] Écriture du cache impossible", error));
+  }
   return analysis;
 }

@@ -1,17 +1,17 @@
-// Limites d'utilisation de l'IA (skill chess-analysis §8). Module pur : les lignes ai_usage sont
-// lues par store.ts, les calculs se font ici.
+// Limites d'utilisation de l'IA (skill chess-analysis §8). Module pur : les totaux ai_usage sont
+// agrégés en SQL (fonction ai_usage_summary) par store.ts, les calculs se font ici.
 
 /** Fuseau utilisé pour « aujourd'hui » et « ce mois-ci ». */
 export const USAGE_TIME_ZONE = "Europe/Paris";
 
-export type UsageRow = {
-  created_at: string;
-  status: string;
+/** Totaux d'une période renvoyés par la fonction SQL ai_usage_summary. */
+export type UsageTotals = {
+  calls: number;
+  cost_usd: number;
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
-  cost_usd: number;
 };
 
 export type UsageSummary = {
@@ -65,36 +65,19 @@ export function startOfPeriod(now: Date, period: "day" | "month", timeZone = USA
   return new Date(start);
 }
 
-/** Agrège les lignes ai_usage du mois (toutes les lignes comptent : chaque ligne est un appel). */
-export function summarizeUsage(rows: UsageRow[], now: Date, timeZone = USAGE_TIME_ZONE): UsageSummary {
-  const dayStart = startOfPeriod(now, "day", timeZone).getTime();
-  const monthStart = startOfPeriod(now, "month", timeZone).getTime();
-  const summary: UsageSummary = {
-    callsToday: 0,
-    callsMonth: 0,
-    costToday: 0,
-    costMonth: 0,
-    inputTokensMonth: 0,
-    outputTokensMonth: 0,
-    cacheReadTokensMonth: 0,
+const round6 = (value: number) => Math.round(value * 1e6) / 1e6;
+
+/** Résumé jour/mois à partir des totaux SQL (toutes les lignes comptent : chaque ligne est un appel). */
+export function combineUsageTotals(day: UsageTotals, month: UsageTotals): UsageSummary {
+  return {
+    callsToday: Number(day.calls) || 0,
+    callsMonth: Number(month.calls) || 0,
+    costToday: round6(Number(day.cost_usd) || 0),
+    costMonth: round6(Number(month.cost_usd) || 0),
+    inputTokensMonth: (Number(month.input_tokens) || 0) + (Number(month.cache_write_tokens) || 0),
+    outputTokensMonth: Number(month.output_tokens) || 0,
+    cacheReadTokensMonth: Number(month.cache_read_tokens) || 0,
   };
-  for (const row of rows) {
-    const at = new Date(row.created_at).getTime();
-    if (Number.isNaN(at) || at < monthStart || at > now.getTime()) continue;
-    const cost = Number(row.cost_usd) || 0;
-    summary.callsMonth += 1;
-    summary.costMonth += cost;
-    summary.inputTokensMonth += row.input_tokens + row.cache_write_tokens;
-    summary.outputTokensMonth += row.output_tokens;
-    summary.cacheReadTokensMonth += row.cache_read_tokens;
-    if (at >= dayStart) {
-      summary.callsToday += 1;
-      summary.costToday += cost;
-    }
-  }
-  summary.costMonth = Math.round(summary.costMonth * 1e6) / 1e6;
-  summary.costToday = Math.round(summary.costToday * 1e6) / 1e6;
-  return summary;
 }
 
 /** Peut-on lancer un nouvel appel ? Le budget est atteint dès que le coût du mois l'égale. */

@@ -91,7 +91,7 @@ export function exerciseDifficulty(input: {
   solution: ValidatedLine;
 }): Difficulty {
   // Les imprécisions ne sont proposées qu'au niveau facile (skill §9).
-  if (input.classification === "inaccuracy" && !input.themes.includes("calculation")) return "easy";
+  if (input.classification === "inaccuracy") return "easy";
   if (input.mateIn !== null && input.mateIn <= 2) return "easy";
   const firstSan = input.solution.san[0] ?? "";
   const quiet = !/[x+#]/.test(firstSan);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ValidatedLine } from "@/lib/analysis/types";
-import { checkAttempt, AttemptBodySchema } from "./attempt";
+import { DEFAULT_THRESHOLDS, type PositionAnalysis, type ValidatedLine } from "@/lib/analysis/types";
+import { AttemptBodySchema, judgeAttempt, positionAfter } from "./attempt";
 import { selectNextExercises, groupTrainingStats, type QueueExercise } from "./queue";
 import { analyzeSolution, buildExercise, exerciseDifficulty, type ExerciseSourceMove } from "./select";
 import { nextSuccessInterval, scheduleReview } from "./sm2";
@@ -184,29 +184,46 @@ describe("file d'exercices", () => {
   });
 });
 
-describe("validation d'une réponse (API)", () => {
+describe("jugement d'une réponse (serveur)", () => {
   const exercise = { fen: FEN, accepted_uci: ["f3g5"] };
+  const analysis = (fen: string, cp: number, pv: string[]): PositionAnalysis => ({
+    fen,
+    depth: 16,
+    multipv: 1,
+    engineVersion: "sf19-lite-single",
+    lines: [{ multipv: 1, depth: 16, evaluation: { cp, mate: null }, pvUci: pv }],
+  });
+  const before = analysis(FEN, 60, ["f3g5", "d7d5"]);
+  const after = (uci: string, cp: number) => analysis(positionAfter(FEN, uci)!.fenAfter, cp, []);
 
-  it("refuse un coup illégal", () => {
-    expect(checkAttempt(exercise, { answerUci: "e1g8", correct: false, loss: 50 })).toMatchObject({ ok: false });
+  it("calcule la position obtenue et refuse un coup illégal", () => {
+    expect(positionAfter(FEN, "e1g8")).toBeNull();
+    expect(positionAfter(FEN, "f3g5")?.san).toBe("Ng5");
+    expect(judgeAttempt(exercise, "e1g8", before, before, DEFAULT_THRESHOLDS)).toMatchObject({ ok: false });
   });
 
-  it("accepte un coup légal et renvoie sa notation SAN", () => {
-    expect(checkAttempt(exercise, { answerUci: "f3g5", correct: true, loss: 0 })).toEqual({ ok: true, answerSan: "Ng5", correct: true });
-    expect(checkAttempt(exercise, { answerUci: "d2d3", correct: false, loss: 15 })).toEqual({ ok: true, answerSan: "d3", correct: false });
+  it("juge correct un coup accepté", () => {
+    expect(judgeAttempt(exercise, "f3g5", before, after("f3g5", 60), DEFAULT_THRESHOLDS)).toMatchObject({
+      ok: true,
+      answerSan: "Ng5",
+      correct: true,
+      verdict: "good",
+      bestSan: "Ng5",
+    });
   });
 
-  it("refuse un verdict incohérent avec les coups acceptés", () => {
-    expect(checkAttempt(exercise, { answerUci: "f3g5", correct: false, loss: 0 }).ok).toBe(false);
-    expect(checkAttempt(exercise, { answerUci: "d2d3", correct: true, loss: 15 }).ok).toBe(false);
-    // Un autre coup peut être jugé correct par Stockfish si sa perte est < 5.
-    expect(checkAttempt(exercise, { answerUci: "b1c3", correct: true, loss: 2 }).ok).toBe(true);
+  it("juge par Stockfish un coup hors solution : perte faible = correct, forte = erreur", () => {
+    expect(judgeAttempt(exercise, "b1c3", before, after("b1c3", 50), DEFAULT_THRESHOLDS)).toMatchObject({ ok: true, correct: true });
+    const bad = judgeAttempt(exercise, "d2d3", before, after("d2d3", -300), DEFAULT_THRESHOLDS);
+    expect(bad).toMatchObject({ ok: true, correct: false, verdict: "error" });
+    if (bad.ok) expect(bad.loss).toBeGreaterThan(DEFAULT_THRESHOLDS.mistake);
   });
 
-  it("valide le corps de la requête", () => {
-    const valid = { exerciseId: "6f1c1f53-7a0e-4f5e-9f0a-2a7c1f2b9e11", answerUci: "e7e8q", correct: true, loss: 0 };
+  it("valide le corps de la requête (le verdict n'en fait plus partie)", () => {
+    const valid = { exerciseId: "6f1c1f53-7a0e-4f5e-9f0a-2a7c1f2b9e11", answerUci: "e7e8q" };
     expect(AttemptBodySchema.safeParse(valid).success).toBe(true);
     expect(AttemptBodySchema.safeParse({ ...valid, answerUci: "Nf3" }).success).toBe(false);
     expect(AttemptBodySchema.safeParse({ ...valid, exerciseId: "1" }).success).toBe(false);
+    expect(Object.keys(AttemptBodySchema.parse({ ...valid, correct: true, loss: 0 }))).toEqual(["exerciseId", "answerUci"]);
   });
 });

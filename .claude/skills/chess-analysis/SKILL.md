@@ -29,7 +29,7 @@ Ne pas dupliquer ces fonctions ailleurs : importer depuis ces modules.
 
 - Stockfish tourne **dans le navigateur** (WebAssembly, build *lite single-thread* du paquet npm `stockfish`), dans un **Web Worker** dédié, piloté en UCI. Jamais sur le thread principal, jamais côté serveur Vercel.
 - Initialisation : `uci` → attendre `uciok` → `setoption name MultiPV value N` → `isready` → `readyok`. Sur chaque position : `position fen <FEN>` puis `go depth <D>` ; lire les lignes `info ... multipv k ... score (cp|mate) X ... pv ...` de la **dernière profondeur complète**, jusqu'à `bestmove`.
-- Un seul `go` à la fois par worker ; file d'attente ; `stop` + timeout (par défaut 15 s par position) avec repli sur la meilleure profondeur atteinte.
+- Un seul `go` à la fois par worker ; file d'attente ; `stop` + timeout (par défaut 15 s par position) avec repli sur la meilleure profondeur atteinte. Un résultat de repli est marqué `partial: true` : utilisable pour l'affichage, **jamais écrit dans `position_analyses`** (sinon une analyse incomplète deviendrait définitive), et signalé à l'utilisateur.
 - Paramètres par défaut (configurables dans Paramètres) : profondeur **16**, **MultiPV 3**, et MultiPV 1 suffit pour la position *après* le dernier coup.
 - Pour une partie de N demi-coups : analyser les **N+1 positions** (position initiale incluse). L'évaluation « avant » le coup i est celle de la position i, l'évaluation « après » est celle de la position i+1. Ne jamais lancer une deuxième recherche pour la même position.
 - Version du moteur (`engineVersion`, ex. `sf19-lite-single`) enregistrée avec chaque analyse.
@@ -120,15 +120,15 @@ Toujours distinguer `tactical` (tactics, hanging_piece, missed_tactic, king_safe
 ## 8. Cache et coûts
 
 - `position_analyses` : clé unique `(fen, depth, multipv, engine_version)` — consulter avant tout calcul ; une position déjà analysée n'est jamais recalculée (y compris entre parties : les positions d'ouverture se répètent).
-- `explanations` : clé unique `(game_id, ply, prompt_version, model)` — renvoyer l'explication en cache sans appel API.
-- `ai_usage` : une ligne par appel (tokens entrée/sortie, cache lu/écrit, coût estimé, statut). Tarif Haiku 5.5 : **0,10 $ / M tokens en entrée, 0,50 $ / M en sortie** (≤ 100 K tokens de prompt), lecture cache ≈ 0,1× le tarif d'entrée. Constantes dans `src/lib/ai/pricing.ts`.
+- `explanations` : clé unique `(game_id, ply, prompt_version, model)` — renvoyer l'explication en cache sans appel API. Une nouvelle analyse de la partie supprime les explications des demi-coups dont le meilleur coup ou la classification a changé.
+- `ai_usage` : une ligne par appel (tokens entrée/sortie, cache lu/écrit, coût estimé, statut). Les totaux jour/mois se calculent en SQL (`rpc("ai_usage_summary", { since })`), jamais en lisant les lignes (PostgREST plafonne à 1000). Tarif Haiku 5.5 : **0,10 $ / M tokens en entrée, 0,50 $ / M en sortie** (≤ 100 K tokens de prompt), lecture cache ≈ 0,1× le tarif d'entrée. Constantes dans `src/lib/ai/pricing.ts`.
 - Avant chaque appel : vérifier les limites des paramètres (appels par jour, budget mensuel en $). Limite atteinte → HTTP 429 avec message clair, aucun appel.
 
 ## 9. Exercices (entraînement)
 
 - Source : coups du joueur `mistake`/`blunder`/`missedWin` (et `inaccuracy` en difficulté facile) dont la solution est **nette** : écart de win % entre le meilleur coup et le 2ᵉ candidat ≥ 10, ou meilleur coup qui mate. Sinon plusieurs réponses sont acceptées : tout coup dont la perte < 5 par rapport au meilleur est considéré correct.
 - Position présentée = position **avant** l'erreur, joueur au trait, solution masquée.
-- Évaluation de la réponse : par Stockfish (même règles de perte que §4) — jamais par l'IA. L'IA peut ensuite expliquer (même pipeline que §7, à la demande).
+- Évaluation de la réponse : par Stockfish (même règles de perte que §4) — jamais par l'IA. Le navigateur calcule et **enregistre** les analyses (avant/après le coup), puis n'envoie que le coup : le serveur relit `position_analyses` et calcule lui-même le verdict (`judgeAttempt`). L'IA peut ensuite expliquer (même pipeline que §7, à la demande).
 - Difficulté : `easy` (perte évitée ≥ 30 ou mat en 1-2), `medium`, `hard` (PV ≥ 6 demi-coups ou `calculation`).
 - Répétition espacée type SM-2 simplifié : réussite → intervalle ×2,5 (1 j, 3 j, 7 j…), échec → retour à 1 j ; prioriser les thèmes où le taux de réussite est le plus faible.
 

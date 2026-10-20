@@ -15,7 +15,7 @@ import {
 } from "@/lib/analysis/types";
 import { formatEvaluation, moverWinPercent } from "@/lib/analysis/win";
 import { formatSanLine } from "@/lib/analysis/labels";
-import { allowedMovesFor } from "./verify";
+import { allowedMovesFor, PROMPT_CANDIDATES } from "./verify";
 
 export const PROMPT_VERSION = "explain-v1";
 
@@ -149,7 +149,7 @@ export function buildUserMessage(move: MoveAnalysis, game: GameContext): string 
   const candidates =
     move.candidates.length > 0
       ? move.candidates
-          .slice(0, 3)
+          .slice(0, PROMPT_CANDIDATES)
           .map((line, index) => `${index + 1}. ${describeLine(move.fenBefore, line, color)}`)
           .join("\n")
       : "(aucun candidat fourni)";

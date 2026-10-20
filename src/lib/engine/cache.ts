@@ -39,9 +39,9 @@ export async function loadCachedAnalyses(fens: readonly string[], key: CacheKey)
   return found;
 }
 
-/** Enregistre une analyse moteur (sans effet si elle existe déjà). */
+/** Enregistre une analyse moteur (sans effet si elle existe déjà, si elle est partielle ou terminale). */
 export async function storeAnalysis(analysis: PositionAnalysis): Promise<void> {
-  if (analysis.terminal) return;
+  if (analysis.terminal || analysis.partial) return;
   const { error } = await getSupabaseBrowserClient()
     .from("position_analyses")
     .upsert(

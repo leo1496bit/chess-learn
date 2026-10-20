@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { analyzeGame, getEngine, isAbortError, type AnalyzeGameProgress } from "@/lib/engine";
-import type { Color, GameAnalysisSummary, MoveAnalysis, Thresholds } from "@/lib/analysis/types";
+import { analyzeGame, getEngine, isAbortError, type AnalyzeGameProgress, type AnalyzeGameResult } from "@/lib/engine";
+import { invalidateExplanationCache } from "@/components/ai/explanation-panel";
+import type { Color, Thresholds } from "@/lib/analysis/types";
 
 export type AnalysisRunState =
   | { status: "idle" }
@@ -16,13 +17,14 @@ export type GameAnalysisParams = {
   depth: number;
   multipv: number;
   thresholds: Thresholds;
-  previousStatus: string;
 };
 
 /** Lance l'analyse d'une partie dans le navigateur, avec progression et annulation. */
-export function useGameAnalysis(onDone: (result: { moves: MoveAnalysis[]; summary: GameAnalysisSummary }) => void) {
+export function useGameAnalysis(onDone: (result: AnalyzeGameResult) => void) {
   const [state, setState] = useState<AnalysisRunState>({ status: "idle" });
   const controllerRef = useRef<AbortController | null>(null);
+  // Exécution en cours : une relance attend qu'elle ait fini (annulée) avant d'écrire à son tour.
+  const runRef = useRef<Promise<unknown> | null>(null);
   const onDoneRef = useRef(onDone);
   useEffect(() => {
     onDoneRef.current = onDone;
@@ -36,8 +38,11 @@ export function useGameAnalysis(onDone: (result: { moves: MoveAnalysis[]; summar
     const controller = new AbortController();
     controllerRef.current = controller;
     setState({ status: "running", progress: { done: 0, total: 0, fromCache: 0, stage: "cache" } });
+    const previousRun = runRef.current;
+    if (previousRun) await previousRun.catch(() => undefined);
+    if (controller.signal.aborted) return;
     try {
-      const result = await analyzeGame({
+      const run = analyzeGame({
         ...params,
         engine: getEngine(),
         signal: controller.signal,
@@ -45,8 +50,11 @@ export function useGameAnalysis(onDone: (result: { moves: MoveAnalysis[]; summar
           if (!controller.signal.aborted) setState({ status: "running", progress });
         },
       });
+      runRef.current = run;
+      const result = await run;
       if (controller.signal.aborted) return;
       setState({ status: "idle" });
+      if (result.staleExplanations.length > 0) invalidateExplanationCache(params.gameId);
       onDoneRef.current(result);
     } catch (error) {
       if (isAbortError(error) || controller.signal.aborted) {

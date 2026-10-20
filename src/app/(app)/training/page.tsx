@@ -117,7 +117,6 @@ export default async function TrainingPage({
             exercises={queue}
             depth={settings.engineDepth}
             multipv={settings.engineMultipv}
-            thresholds={settings.thresholds}
           />
         </div>
 

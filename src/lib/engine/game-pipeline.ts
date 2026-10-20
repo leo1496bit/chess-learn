@@ -24,14 +24,19 @@ export type AnalyzeGameOptions = {
   multipv: number;
   thresholds: Thresholds;
   engine: StockfishEngine;
-  /** Statut à rétablir si l'analyse est annulée (`none` ou `done`). */
-  previousStatus: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   onProgress?: (progress: AnalyzeGameProgress) => void;
 };
 
-export type AnalyzeGameResult = { moves: MoveAnalysis[]; summary: GameAnalysisSummary };
+export type AnalyzeGameResult = {
+  moves: MoveAnalysis[];
+  summary: GameAnalysisSummary;
+  /** Positions dont la recherche a été interrompue (timeout) : non mises en cache, recalculées à la prochaine analyse. */
+  partialPositions: number;
+  /** Demi-coups dont l'explication IA a été supprimée car l'analyse a changé. */
+  staleExplanations: number[];
+};
 
 const round2 = (n: number | null) => (n === null ? null : Math.round(n * 100) / 100);
 
@@ -39,14 +44,17 @@ const round2 = (n: number | null) => (n === null ? null : Math.round(n * 100) / 
  * Analyse complète d'une partie dans le navigateur : N+1 positions via le cache puis le moteur
  * (une recherche par position au plus), classification, puis persistance de move_analyses,
  * game_analyses et des précisions de la partie.
+ *
+ * Le statut « running » n'est jamais écrit en base (un onglet fermé le laisserait bloqué) : la
+ * partie passe directement de son statut précédent à `done` ou `error`. Une annulation, même
+ * pendant la sauvegarde, n'écrit plus rien.
  */
 export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeGameResult> {
   const { gameId, pgn, playerColor, depth, multipv, thresholds, engine, signal, onProgress } = options;
   const supabase = getSupabaseBrowserClient();
 
-  const setStatus = async (status: string) => {
-    const { error } = await supabase.from("games").update({ analysis_status: status }).eq("id", gameId);
-    if (error) console.warn(`[analysis] Statut ${status} non enregistré : ${error.message}`);
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw new EngineError("aborted");
   };
 
   try {
@@ -56,7 +64,6 @@ export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeG
     // MultiPV complet pour les positions avant un coup ; MultiPV 1 suffit pour la position finale.
     const multipvAt = (i: number) => (i === lastIndex ? 1 : multipv);
 
-    await setStatus("running");
     onProgress?.({ done: 0, total, fromCache: 0, stage: "cache" });
 
     const results: (PositionAnalysis | undefined)[] = fens.map((fen, i) => terminalAnalysis(fen, depth, multipvAt(i)) ?? undefined);
@@ -74,7 +81,7 @@ export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeG
     const writes: Promise<void>[] = [];
     for (let i = 0; i < fens.length; i++) {
       if (results[i]) continue;
-      if (signal?.aborted) throw new EngineError("aborted");
+      throwIfAborted();
       const analysis = await engine.analyze(fens[i], { depth, multipv: multipvAt(i), signal, timeoutMs: options.timeoutMs });
       results[i] = analysis;
       writes.push(storeAnalysis(analysis).catch((error: unknown) => console.warn("[analysis] Cache non enregistré", error)));
@@ -84,8 +91,21 @@ export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeG
 
     onProgress?.({ done, total, fromCache, stage: "saving" });
     const { moves, summary } = buildGameAnalysis(pgn, playerColor, results as PositionAnalysis[], thresholds);
+    const partialPositions = results.filter((r) => r?.partial).length;
     await Promise.all(writes);
 
+    // Analyse précédente (si elle existe) : sert à repérer les explications IA devenues périmées.
+    const previous = await supabase.from("move_analyses").select("ply, best_uci, classification").eq("game_id", gameId);
+    if (previous.error) throw new Error(`Lecture de l'analyse précédente impossible : ${previous.error.message}`);
+    const byPly = new Map(moves.map((m) => [m.ply, m]));
+    const staleExplanations = previous.data
+      .filter((row) => {
+        const next = byPly.get(row.ply);
+        return !next || next.bestUci !== row.best_uci || next.classification !== row.classification;
+      })
+      .map((row) => row.ply);
+
+    throwIfAborted();
     if (moves.length > 0) {
       const { error } = await supabase
         .from("move_analyses")
@@ -94,6 +114,12 @@ export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeG
     }
     const cleanup = await supabase.from("move_analyses").delete().eq("game_id", gameId).gt("ply", moves.length);
     if (cleanup.error) throw new Error(`Nettoyage des anciennes analyses impossible : ${cleanup.error.message}`);
+    if (staleExplanations.length > 0) {
+      const stale = await supabase.from("explanations").delete().eq("game_id", gameId).in("ply", staleExplanations);
+      if (stale.error) throw new Error(`Suppression des explications périmées impossible : ${stale.error.message}`);
+    }
+
+    throwIfAborted();
 
     const gameAnalysis = await supabase.from("game_analyses").upsert(
       {
@@ -109,6 +135,8 @@ export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeG
     );
     if (gameAnalysis.error) throw new Error(`Enregistrement du résumé impossible : ${gameAnalysis.error.message}`);
 
+    throwIfAborted();
+
     const game = await supabase
       .from("games")
       .update({
@@ -119,9 +147,12 @@ export async function analyzeGame(options: AnalyzeGameOptions): Promise<AnalyzeG
       .eq("id", gameId);
     if (game.error) throw new Error(`Mise à jour de la partie impossible : ${game.error.message}`);
 
-    return { moves, summary };
+    return { moves, summary, partialPositions, staleExplanations };
   } catch (error) {
-    await setStatus(isAbortError(error) ? options.previousStatus : "error");
+    if (!isAbortError(error)) {
+      const { error: statusError } = await supabase.from("games").update({ analysis_status: "error" }).eq("id", gameId);
+      if (statusError) console.warn(`[analysis] Statut error non enregistré : ${statusError.message}`);
+    }
     throw error;
   }
 }

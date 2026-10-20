@@ -33,13 +33,14 @@ export async function getSettings(supabase: SupabaseServerClient): Promise<AppSe
 
   let row = data;
   if (!row) {
-    const inserted = await supabase
+    // Premier accès : deux rendus parallèles peuvent créer la ligne en même temps, d'où l'upsert.
+    const created = await supabase
       .from("settings")
-      .insert({ chesscom_username: serverEnv.chesscomUsername })
-      .select("*")
-      .single();
-    if (inserted.error) throw new Error(`Création des paramètres impossible : ${inserted.error.message}`);
-    row = inserted.data;
+      .upsert({ chesscom_username: serverEnv.chesscomUsername }, { onConflict: "user_id", ignoreDuplicates: true });
+    if (created.error) throw new Error(`Création des paramètres impossible : ${created.error.message}`);
+    const reread = await supabase.from("settings").select("*").single();
+    if (reread.error) throw new Error(`Lecture des paramètres impossible : ${reread.error.message}`);
+    row = reread.data;
   }
 
   const thresholds = ThresholdsSchema.safeParse(row.thresholds);

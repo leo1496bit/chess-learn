@@ -84,6 +84,13 @@ describe("UciEngine", () => {
     const r = await new UciEngine(fake.factory).analyze(START, { depth: 20, multipv: 1, timeoutMs: 20 });
     expect(fake.commands).toContain("stop");
     expect(r.lines[0].depth).toBe(1);
+    // Profondeur demandée non atteinte : résultat partiel, jamais mis en cache.
+    expect(r.partial).toBe(true);
+  });
+
+  it("ne marque pas partielle une recherche qui atteint la profondeur demandée", async () => {
+    const r = await new UciEngine(fakeTransport().factory).analyze(START, { depth: 2, multipv: 2 });
+    expect(r.partial).toBeUndefined();
   });
 
   it("annule une recherche via AbortSignal", async () => {

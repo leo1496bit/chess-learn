@@ -28,6 +28,9 @@ export function normalizeSan(san: string): string {
     .replace(/[+#]/g, "");
 }
 
+/** Nombre de coups candidats transmis à l'IA (prompt.ts) : seuls ceux-là peuvent être cités. */
+export const PROMPT_CANDIDATES = 3;
+
 /** Coups (SAN normalisé) qu'une explication de ce coup a le droit de citer. */
 export function allowedMovesFor(move: Pick<MoveAnalysis, "san" | "bestSan" | "candidates" | "punishLine">): Set<string> {
   const allowed = new Set<string>();
@@ -36,7 +39,7 @@ export function allowedMovesFor(move: Pick<MoveAnalysis, "san" | "bestSan" | "ca
   };
   add(move.san);
   add(move.bestSan);
-  for (const line of move.candidates) line.san.forEach(add);
+  for (const line of move.candidates.slice(0, PROMPT_CANDIDATES)) line.san.forEach(add);
   move.punishLine?.san.forEach(add);
   return allowed;
 }

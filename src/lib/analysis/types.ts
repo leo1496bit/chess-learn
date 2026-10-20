@@ -21,6 +21,11 @@ export type PositionAnalysis = {
   multipv: number;
   engineVersion: string;
   lines: EngineLine[]; // triées par multipv
+  /**
+   * Recherche interrompue (timeout) avant la profondeur demandée ou sans toutes les lignes MultiPV.
+   * Utilisable pour l'affichage, mais jamais enregistrée dans le cache position_analyses.
+   */
+  partial?: boolean;
   /** Position terminale (mat/pat) : pas de ligne moteur, évaluation donnée par les règles. */
   terminal?: { evaluation: Evaluation; reason: "checkmate" | "stalemate" | "draw" };
 };

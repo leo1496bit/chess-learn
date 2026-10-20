@@ -17,7 +17,6 @@ export async function POST() {
     return Response.json(result);
   } catch (error) {
     console.error("[training/generate]", error);
-    const message = error instanceof Error ? error.message : "Erreur inconnue";
-    return errorResponse(500, `La génération des exercices a échoué : ${message}`);
+    return errorResponse(500, "La génération des exercices a échoué. Réessaie dans un instant.");
   }
 }

@@ -4,8 +4,7 @@ import { SettingsForm } from "@/components/settings/settings-form";
 import { AiUsage } from "@/components/settings/ai-usage";
 import { requireUser } from "@/lib/db/server";
 import { getSettings } from "@/lib/db/settings";
-import { summarizeUsage } from "@/lib/ai/limits";
-import { loadMonthUsage, loadRecentUsage } from "@/lib/ai/store";
+import { loadRecentUsage, loadUsageSummary } from "@/lib/ai/store";
 import { saveSettings } from "./actions";
 
 export const metadata: Metadata = { title: "Paramètres" };
@@ -13,9 +12,9 @@ export const metadata: Metadata = { title: "Paramètres" };
 export default async function SettingsPage() {
   const { supabase } = await requireUser();
   const now = new Date();
-  const [settings, monthRows, recent] = await Promise.all([
+  const [settings, summary, recent] = await Promise.all([
     getSettings(supabase),
-    loadMonthUsage(supabase, now),
+    loadUsageSummary(supabase, now),
     loadRecentUsage(supabase, 20),
   ]);
 
@@ -27,7 +26,7 @@ export default async function SettingsPage() {
       />
       <SettingsForm initial={settings} action={saveSettings} />
       <AiUsage
-        summary={summarizeUsage(monthRows, now)}
+        summary={summary}
         recent={recent}
         dailyLimit={settings.aiDailyCallLimit}
         monthlyBudget={settings.aiMonthlyBudgetUsd}
