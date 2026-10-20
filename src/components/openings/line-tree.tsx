@@ -6,6 +6,7 @@ import {
   buildLineTree,
   type BranchStatus,
   type LinePageBranch,
+  type TreeMove,
   type TreeSegment,
 } from "@/lib/repertoire/line-view";
 import { cn } from "@/lib/utils";
@@ -32,19 +33,35 @@ type TreeProps = {
   statuses: Record<string, BranchStatus>;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Demi-coups joués depuis la position de départ dans la position affichée (sur la branche sélectionnée). */
+  shownPly: number;
+  /** Clic sur un coup : afficher la position qui suit ce coup. */
+  onMove: (move: TreeMove) => void;
+  /** Clic sur les coups de départ : revenir à la position de départ de la ligne. */
+  onStart: () => void;
 };
 
 /** Arbre de la ligne façon feuille de notation : tronc commun, puis variantes en retrait. */
-export function LineTree({ rootFen, prefixSan, branches, statuses, selectedId, onSelect }: TreeProps) {
+export function LineTree({ rootFen, prefixSan, branches, statuses, selectedId, onSelect, shownPly, onMove, onStart }: TreeProps) {
   const tree = useMemo(() => buildLineTree(rootFen, branches), [rootFen, branches]);
   const selected = branches.find((b) => b.id === selectedId) ?? null;
 
   return (
     <div className="space-y-2">
       {prefixSan.length > 0 ? (
-        <p className="tabular text-sm text-muted-foreground">
-          <span className="sr-only">Coups de départ : </span>
-          {formatPrefix(prefixSan)}
+        <p className="text-sm">
+          <button
+            type="button"
+            onClick={onStart}
+            aria-current={shownPly === 0 ? "true" : undefined}
+            className={cn(
+              "tabular rounded px-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              shownPly === 0 && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+            )}
+          >
+            <span className="sr-only">Position de départ, après les coups </span>
+            {formatPrefix(prefixSan)}
+          </button>
         </p>
       ) : null}
       <SegmentList
@@ -56,6 +73,8 @@ export function LineTree({ rootFen, prefixSan, branches, statuses, selectedId, o
         branches={branches}
         selectedId={selectedId}
         onSelect={onSelect}
+        shownPly={shownPly}
+        onMove={onMove}
         root
       />
       <p className="text-xs text-muted-foreground">
@@ -76,6 +95,8 @@ type ListProps = {
   branches: LinePageBranch[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  shownPly: number;
+  onMove: (move: TreeMove) => void;
   root?: boolean;
 };
 
@@ -98,20 +119,31 @@ function SegmentItem({ segment, selectedSan, onPath, ...props }: Omit<ListProps,
   return (
     <li>
       <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 leading-relaxed">
-        {segment.moves.map((move, i) => (
-          <span
-            key={move.index}
-            className={cn("tabular whitespace-nowrap rounded px-0.5", onSelectedPath(i) && "bg-accent")}
-          >
-            {move.number ? <span className="text-muted-foreground">{move.number} </span> : null}
-            <span className={move.isPlayer ? "font-bold text-primary" : undefined}>{move.san}</span>
-            {move.ownGames !== null ? (
-              <span className="ml-1 text-xs text-muted-foreground">
-                {move.ownGames} partie{move.ownGames > 1 ? "s" : ""}
-              </span>
-            ) : null}
-          </span>
-        ))}
+        {segment.moves.map((move, i) => {
+          const current = onSelectedPath(i) && props.shownPly === move.index + 1;
+          return (
+            <span key={move.index} className="tabular whitespace-nowrap">
+              <button
+                type="button"
+                onClick={() => props.onMove(move)}
+                aria-current={current ? "true" : undefined}
+                className={cn(
+                  "rounded px-0.5 hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  onSelectedPath(i) && "bg-accent",
+                  current && "bg-primary text-primary-foreground hover:bg-primary",
+                )}
+              >
+                {move.number ? <span className={current ? undefined : "text-muted-foreground"}>{move.number} </span> : null}
+                <span className={cn(move.isPlayer && "font-bold", move.isPlayer && !current && "text-primary")}>{move.san}</span>
+              </button>
+              {move.ownGames !== null ? (
+                <span className="ml-1 text-xs text-muted-foreground">
+                  {move.ownGames} partie{move.ownGames > 1 ? "s" : ""}
+                </span>
+              ) : null}
+            </span>
+          );
+        })}
         {segment.branchIds.map((id) => {
           const branch = byId.get(id);
           const status = props.statuses[id] ?? "new";

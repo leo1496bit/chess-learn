@@ -1,18 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, RefreshCw } from "lucide-react";
 import { ChessBoard } from "@/components/chess/chess-board";
 import { Button } from "@/components/ui/button";
 import type { ApiErrorBody } from "@/lib/ai/schema";
 import type { BranchIdeasResponse } from "@/lib/ai/branch/schema";
 import {
   BRANCH_STATUS_LABELS,
+  branchPositions,
   branchStatus,
   type BranchStatus,
   type LinePageBranch,
   type LinePageLine,
+  type TreeMove,
 } from "@/lib/repertoire/line-view";
 import { formatDate } from "@/lib/stats/format";
 import { BoardLayout } from "./board-layout";
@@ -20,6 +22,12 @@ import { BranchRecite } from "./branch-recite";
 import { BranchStudy, UnverifiedNote, type IdeasEntry } from "./branch-study";
 import { BuildRunner } from "./build-runner";
 import { LineTree, StatusDot } from "./line-tree";
+
+/** « 5. » ou « 5... » selon le camp au trait dans la position qui précède le coup. */
+function moveNumber(fenBefore: string): string {
+  const [, side, , , , fullmove] = fenBefore.split(" ");
+  return side === "w" ? `${fullmove}. ` : `${fullmove}... `;
+}
 
 type Mode = { kind: "browse" } | { kind: "study"; branchId: string } | { kind: "recite"; branchId: string };
 
@@ -52,11 +60,61 @@ export function LineWorkspace({
   const selected = branches.find((b) => b.id === selectedId) ?? null;
   const active = mode.kind === "browse" ? null : (branches.find((b) => b.id === mode.branchId) ?? null);
 
+  // Position affichée : demi-coups joués depuis la position de départ le long de la branche sélectionnée
+  // (null = position finale de la branche).
+  const [ply, setPly] = useState<number | null>(null);
+  const positions = useMemo(
+    () => (selected ? branchPositions(line.rootFen, selected.pathUci) : { fens: [line.rootFen], san: [] }),
+    [selected, line.rootFen],
+  );
+  const lastPly = positions.fens.length - 1;
+  const shownPly = ply === null ? lastPly : Math.min(ply, lastPly);
+  const goTo = (target: number) => setPly(Math.max(0, Math.min(lastPly, target)));
+
+  function selectBranch(id: string) {
+    setSelectedId(id);
+    setPly(null);
+  }
+
+  /** Clic sur un coup de l'arbre : garder la branche sélectionnée si elle passe par ce coup. */
+  function showMove(move: TreeMove) {
+    const via = branches.find((b) => b.id === move.branchId);
+    const keep =
+      selected !== null && via !== undefined && via.pathSan.slice(0, move.index + 1).every((san, i) => selected.pathSan[i] === san);
+    if (!keep) setSelectedId(move.branchId);
+    setPly(move.index + 1);
+  }
+
+  // ← / → parcourent la branche sélectionnée, Début revient à la position de départ (hors étude et récitation).
+  useEffect(() => {
+    if (mode.kind !== "browse") return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === "ArrowLeft") setPly((p) => Math.max(0, (p ?? lastPly) - 1));
+      else if (event.key === "ArrowRight") setPly((p) => Math.min(lastPly, (p ?? lastPly) + 1));
+      else if (event.key === "Home") setPly(0);
+      else if (event.key === "End") setPly(null);
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode.kind, lastPly]);
+
   function ideasFor(id: string): IdeasEntry | undefined {
     const entry = requested[id];
     if (entry) return entry;
     const cached = cachedIdeas[id];
-    return cached ? { kind: "ready", ideas: cached.ideas, verified: cached.verified, cached: true } : undefined;
+    return cached
+      ? {
+          kind: "ready",
+          ideas: cached.ideas,
+          verified: cached.verified,
+          cached: true,
+        }
+      : undefined;
   }
 
   /** Appel IA payant : uniquement sur une action explicite (« Étudier », « Réessayer »). */
@@ -74,12 +132,24 @@ export function LineWorkspace({
       });
       const body = (await response.json().catch(() => null)) as (Partial<BranchIdeasResponse> & Partial<ApiErrorBody>) | null;
       if (response.ok && body?.ideas) {
-        next = { kind: "ready", ideas: body.ideas, verified: body.verified === true, cached: body.cached === true };
+        next = {
+          kind: "ready",
+          ideas: body.ideas,
+          verified: body.verified === true,
+          cached: body.cached === true,
+        };
       } else {
-        next = { kind: "error", message: body?.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`, code: body?.code };
+        next = {
+          kind: "error",
+          message: body?.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`,
+          code: body?.code,
+        };
       }
     } catch {
-      next = { kind: "error", message: "Connexion au serveur impossible. Vérifie ta connexion puis réessaie." };
+      next = {
+        kind: "error",
+        message: "Connexion au serveur impossible. Vérifie ta connexion puis réessaie.",
+      };
     } finally {
       inFlight.current.delete(id);
     }
@@ -98,8 +168,12 @@ export function LineWorkspace({
     setRebuildPending(true);
     setRebuildError(null);
     try {
-      const response = await fetch(`/api/openings/lines/${line.id}/rebuild`, { method: "POST" });
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      const response = await fetch(`/api/openings/lines/${line.id}/rebuild`, {
+        method: "POST",
+      });
+      const body = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
       if (!response.ok) {
         setRebuildError(body?.error ?? `Le serveur a répondu ${response.status}. Réessaie dans un instant.`);
         return;
@@ -147,7 +221,12 @@ export function LineWorkspace({
   }
 
   const selectedIdeas = selected ? ideasFor(selected.id) : undefined;
-  const boardFen = selected?.endFen ?? line.rootFen;
+  const boardFen = positions.fens[shownPly];
+  const lastMove = shownPly > 0 && selected ? selected.pathUci[shownPly - 1] : null;
+  const positionLabel =
+    shownPly === 0
+      ? "Position de départ de la ligne"
+      : `Après ${moveNumber(positions.fens[shownPly - 1])}${positions.san[shownPly - 1]}${shownPly === lastPly ? " (fin de la branche)" : ""}`;
 
   return (
     <div className="space-y-6">
@@ -158,11 +237,38 @@ export function LineWorkspace({
       ) : null}
 
       <BoardLayout
-        board={<ChessBoard id={`line-${line.id}`} fen={boardFen} orientation={line.playerColor === "w" ? "white" : "black"} />}
+        board={
+          <ChessBoard
+            id={`line-${line.id}`}
+            fen={boardFen}
+            orientation={line.playerColor === "w" ? "white" : "black"}
+            highlightSquares={lastMove ? [lastMove.slice(0, 2), lastMove.slice(2, 4)] : undefined}
+          />
+        }
         controls={
-          <p className="text-center text-sm text-muted-foreground lg:text-left">
-            {selected ? "Position finale de la branche sélectionnée" : "Position de départ de la ligne"}
-          </p>
+          <div className="space-y-1.5">
+            <nav aria-label="Navigation dans l'arbre" className="flex items-center justify-center gap-1.5 lg:justify-start">
+              <Button variant="outline" size="sm" onClick={() => goTo(0)} disabled={shownPly === 0}>
+                <ChevronsLeft data-icon="inline-start" />
+                <span className="max-sm:sr-only">Position de départ</span>
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => goTo(shownPly - 1)} disabled={shownPly === 0} aria-label="Coup précédent">
+                <ChevronLeft />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => goTo(shownPly + 1)}
+                disabled={shownPly === lastPly}
+                aria-label="Coup suivant"
+              >
+                <ChevronRight />
+              </Button>
+            </nav>
+            <p className="tabular text-center text-sm text-muted-foreground lg:text-left" aria-live="polite">
+              {positionLabel}
+            </p>
+          </div>
         }
       >
         <section aria-labelledby="tree-title" className="space-y-4 rounded-lg border bg-card p-4 sm:p-5">
@@ -181,14 +287,22 @@ export function LineWorkspace({
             </p>
           ) : null}
           {branches.length > 0 ? (
-            <LineTree
-              rootFen={line.rootFen}
-              prefixSan={line.prefixSan}
-              branches={branches}
-              statuses={statuses}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-            />
+            <>
+              <LineTree
+                rootFen={line.rootFen}
+                prefixSan={line.prefixSan}
+                branches={branches}
+                statuses={statuses}
+                selectedId={selectedId}
+                onSelect={selectBranch}
+                shownPly={shownPly}
+                onMove={showMove}
+                onStart={() => goTo(0)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Clique sur un coup pour afficher sa position ; les flèches ← et → du clavier parcourent la branche.
+              </p>
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">
               {building

@@ -35,6 +35,15 @@ describe("buildLineTree", () => {
     expect(trunk.children[1].branchIds).toEqual(["c"]);
   });
 
+  it("relie chaque coup à une branche qui passe par lui (pour afficher sa position au clic)", () => {
+    const [trunk] = buildLineTree(ROOT_W, branches);
+    expect(trunk.moves[0].branchId).toBe("a");
+    const [d5, e5] = trunk.children;
+    expect(d5.moves.map((m) => m.branchId)).toEqual(["a", "a"]);
+    expect(d5.children[1].moves.map((m) => m.branchId)).toEqual(["b", "b"]);
+    expect(e5.moves[0].branchId).toBe("c");
+  });
+
   it("numérote les coups depuis la position de départ et marque ceux de Leonel", () => {
     const [trunk] = buildLineTree(ROOT_W, branches);
     const d5 = trunk.children[0];

@@ -28,6 +28,8 @@ export type TreeMove = {
   isPlayer: boolean;
   /** Parties de Leonel avec cette réponse adverse, quand elle termine une branche (sinon null). */
   ownGames: number | null;
+  /** Une branche qui passe par ce coup : son chemin donne la position à afficher au clic. */
+  branchId: string;
 };
 
 /** Suite de coups sans embranchement, puis ses variantes. */
@@ -38,7 +40,7 @@ export type TreeSegment = {
   children: TreeSegment[];
 };
 
-type TrieNode = { san: string; index: number; ownGames: number | null; ends: string[]; children: TrieNode[] };
+type TrieNode = { san: string; index: number; ownGames: number | null; via: string; ends: string[]; children: TrieNode[] };
 
 /** Position de départ : numéro de coup et camp au trait, lus dans la FEN. */
 function rootPly(rootFen: string): { fullmove: number; blackToMove: boolean } {
@@ -50,7 +52,7 @@ export function buildLineTree(
   rootFen: string,
   branches: readonly { id: string; pathSan: readonly string[]; ownGames: number }[],
 ): TreeSegment[] {
-  const root: TrieNode = { san: "", index: -1, ownGames: null, ends: [], children: [] };
+  const root: TrieNode = { san: "", index: -1, ownGames: null, via: "", ends: [], children: [] };
   for (const branch of branches) {
     // Dernière réponse adverse de la branche (indices impairs : la racine a Leonel au trait).
     let lastReply = branch.pathSan.length - 1;
@@ -59,7 +61,7 @@ export function buildLineTree(
     branch.pathSan.forEach((san, index) => {
       let child = node.children.find((c) => c.san === san);
       if (!child) {
-        child = { san, index, ownGames: null, ends: [], children: [] };
+        child = { san, index, ownGames: null, via: branch.id, ends: [], children: [] };
         node.children.push(child);
       }
       if (index === lastReply) child.ownGames = branch.ownGames;
@@ -79,6 +81,7 @@ export function buildLineTree(
       number: white ? `${fullmove}.` : first ? `${fullmove}...` : "",
       isPlayer: node.index % 2 === 0,
       ownGames: node.ownGames,
+      branchId: node.via,
     };
   };
 
