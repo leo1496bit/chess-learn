@@ -7,6 +7,7 @@ import { isErrorClassification } from "@/lib/analysis/classify";
 import { PHASE_LABELS, THEME_LABELS, formatSanLine, moveNumberLabel, themeKind } from "@/lib/analysis/labels";
 import { formatEvaluation } from "@/lib/analysis/win";
 import type { MoveAnalysis } from "@/lib/analysis/types";
+import type { MoveTheory } from "@/lib/openings/identify";
 import { cn } from "@/lib/utils";
 
 const NO_CHANGE = new Set(["best", "forced"]);
@@ -24,7 +25,27 @@ function EvalCell({ label, value, win }: { label: string; value: string; win: nu
 }
 
 /** Détail du coup sélectionné : coup joué, meilleur coup, évaluations, variantes, thèmes, explication. */
-export function MoveDetails({ move, gameId }: { move: MoveAnalysis | null; gameId: string }) {
+function TheoryNote({ theory }: { theory: MoveTheory | null }) {
+  if (!theory || theory.kind === "none" || theory.kind === "out") return null;
+  if (theory.kind === "book") {
+    return (
+      <p className="text-sm">
+        <span className="font-semibold text-primary">Théorie. </span>
+        Coup du livre d&apos;ouvertures{theory.name ? <> : {theory.name}</> : null}
+        {theory.eco ? <span className="tabular text-muted-foreground"> ({theory.eco})</span> : null}.
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm">
+      <span className="font-semibold text-cls-inaccuracy">Sortie de la théorie. </span>
+      Premier coup hors du livre d&apos;ouvertures
+      {theory.lastBookName ? <> (dernière ligne connue : {theory.lastBookName})</> : null}.
+    </p>
+  );
+}
+
+export function MoveDetails({ move, gameId, theory }: { move: MoveAnalysis | null; gameId: string; theory: MoveTheory | null }) {
   if (!move) {
     return (
       <div className="space-y-1">
@@ -68,6 +89,7 @@ export function MoveDetails({ move, gameId }: { move: MoveAnalysis | null; gameI
           )}
           {showBest ? "." : null}
         </p>
+        <TheoryNote theory={theory} />
         {move.missedSave ? (
           <p className="text-sm text-cls-blunder">La position restait défendable avant ce coup : l&apos;occasion de sauver la partie est passée.</p>
         ) : null}
@@ -136,7 +158,9 @@ export function MoveDetails({ move, gameId }: { move: MoveAnalysis | null; gameI
         </section>
       ) : null}
 
-      {move.isPlayerMove && isError ? <ExplanationPanel gameId={gameId} move={move} /> : null}
+      <div className="border-t pt-5">
+        <ExplanationPanel gameId={gameId} move={move} />
+      </div>
     </div>
   );
 }

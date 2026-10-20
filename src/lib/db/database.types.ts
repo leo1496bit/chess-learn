@@ -306,6 +306,50 @@ export type Database = {
           },
         ]
       }
+      game_reports: {
+        Row: {
+          analysis_created_at: string
+          content: Json
+          created_at: string
+          game_id: string
+          id: number
+          model: string
+          prompt_version: string
+          user_id: string
+          verified: boolean
+        }
+        Insert: {
+          analysis_created_at: string
+          content: Json
+          created_at?: string
+          game_id: string
+          id?: never
+          model: string
+          prompt_version: string
+          user_id?: string
+          verified?: boolean
+        }
+        Update: {
+          analysis_created_at?: string
+          content?: Json
+          created_at?: string
+          game_id?: string
+          id?: never
+          model?: string
+          prompt_version?: string
+          user_id?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_reports_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       games: {
         Row: {
           analysis_status: string

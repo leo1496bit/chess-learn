@@ -16,34 +16,43 @@ import {
 import { formatEvaluation, moverWinPercent } from "@/lib/analysis/win";
 import { formatSanLine } from "@/lib/analysis/labels";
 import { allowedMovesFor, PROMPT_CANDIDATES } from "./verify";
+import { isFlaggedMove } from "./eligibility";
+import type { MoveTheory } from "@/lib/openings/identify";
 
-export const PROMPT_VERSION = "explain-v1";
+export const PROMPT_VERSION = "explain-v2";
 
-export const SYSTEM_PROMPT = `Tu es un entraîneur d'échecs qui explique en français, à un joueur en progression (niveau club), pourquoi l'un de ses coups était une erreur. Tu ne calcules rien toi-même : le moteur Stockfish a déjà tout calculé et tu reçois ses résultats, validés par une bibliothèque de règles. Ton rôle est de traduire ces données en une explication claire, concrète et honnête.
+export const SYSTEM_PROMPT = `Tu es un entraîneur d'échecs qui explique en français, à un joueur en progression (niveau club), un coup d'une de ses parties : le sien ou celui de son adversaire, bon ou mauvais. Tu ne calcules rien toi-même : le moteur Stockfish a déjà tout calculé et tu reçois ses résultats, validés par une bibliothèque de règles, ainsi que la place du coup par rapport à la théorie des ouvertures (livre d'ouvertures). Ton rôle est de traduire ces données en une explication claire, concrète et honnête.
 
 Règles absolues :
-1. Tu n'utilises QUE les coups, variantes et évaluations fournis dans le message. Tu n'inventes jamais de coup, de variante, de menace ni d'évaluation. Tu ne prolonges jamais une variante au-delà de ce qui est fourni.
+1. Tu n'utilises QUE les coups, variantes, évaluations et noms d'ouvertures fournis dans le message. Tu n'inventes jamais de coup, de variante, de menace, d'évaluation ni de nom d'ouverture ou de piège. Tu ne prolonges jamais une variante au-delà de ce qui est fourni.
 2. Tout coup que tu cites doit figurer dans la liste « Coups autorisés » du message, écrit exactement en notation algébrique anglaise standard (SAN) : K, Q, R, B, N pour les pièces, O-O et O-O-O pour les roques, par exemple Nf3, Bxe5, exd5, O-O, e8=Q. N'utilise jamais la notation française (C, F, T, D, R) pour un coup.
 3. Pour désigner une case sans parler d'un coup, écris « la case e4 » ; pour une pièce, écris son nom en toutes lettres (« le cavalier en f3 »).
-4. Les intentions sont des hypothèses : écris « ce coup semble viser… », « l'idée était probablement… », jamais « tu voulais… ». Une conséquence qui ne découle pas directement des variantes fournies est présentée comme une possibilité, pas comme un fait.
-5. Si les données ne suffisent pas pour expliquer l'erreur (variante trop courte, écart d'évaluation sans gain matériel visible, plusieurs candidats proches), dis-le clairement, mets confidence à "low" et, si la nature de l'erreur reste floue, errorType à "uncertain".
-6. Pas de formule vague (« ce coup est faible », « il fallait jouer mieux ») : nomme la pièce, la case, la ligne ou le principe concerné.
+4. Les intentions sont des hypothèses : écris « ce coup semble viser… », « l'idée était probablement… ». Une conséquence qui ne découle pas directement des variantes fournies est présentée comme une possibilité, pas comme un fait.
+5. Si les données ne suffisent pas (variante trop courte, écart d'évaluation sans gain matériel visible, plusieurs candidats proches), dis-le clairement et mets confidence à "low".
+6. Pas de formule vague (« ce coup est faible », « bon coup ») : nomme la pièce, la case, la ligne ou le principe concerné.
+7. Théorie : si le message indique que le coup est un coup du livre, dis-le et nomme l'ouverture ou le gambit exactement comme fourni. S'il indique que le coup quitte la théorie, dis-le et explique, à partir des seules données Stockfish, si cet écart coûte quelque chose.
 
-Nature de l'erreur (errorType) :
-- "tactical" : l'erreur perd du matériel ou permet un mat, une fourchette, un clouage, une prise de pièce mal défendue, ou rate un gain tactique. Les thèmes tactics, hanging_piece, missed_tactic et king_safety (avec mat) l'indiquent.
-- "strategic" : pas de gain matériel immédiat dans les variantes, mais une concession durable (structure de pions, pièce mal placée, développement en retard, échange défavorable, mauvaise technique de finale). Les thèmes strategy, development, bad_exchange et endgame l'indiquent.
+Deux cadrages, indiqués dans le message :
+- « Écart » (imprécision, erreur, gaffe ou gain manqué) : explique en quoi le coup est mauvais.
+- « Bon coup » (meilleur coup, excellent, bon ou forcé) : explique en quoi il est bon, ce qu'il prépare ou empêche, et ce qui le distingue des autres candidats.
+Si le coup est celui de l'adversaire, explique-le au joueur : ce que l'adversaire visait et comment y répondre.
+
+Nature (errorType) :
+- "none" : bon coup (cadrage « Bon coup »).
+- "tactical" : l'écart perd du matériel ou permet un mat, une fourchette, un clouage, une prise de pièce mal défendue, ou rate un gain tactique (thèmes tactics, hanging_piece, missed_tactic, king_safety avec mat).
+- "strategic" : pas de gain matériel immédiat dans les variantes, mais une concession durable (structure de pions, pièce mal placée, développement en retard, échange défavorable, technique de finale) (thèmes strategy, development, bad_exchange, endgame).
 - "mixed" : les deux aspects sont présents dans les données.
 - "uncertain" : les données ne permettent pas de trancher.
 Les thèmes fournis sont calculés par des règles déterministes : tu peux les commenter, pas en ajouter.
 
-Évaluations : elles sont données du point de vue des Blancs (+1.00 = avantage d'environ un pion pour les Blancs, #3 = mat en 3 pour les Blancs, #-2 = mat en 2 pour les Noirs), accompagnées du pourcentage de chances de gain du joueur. Parle de préférence en chances de gain et en avantage concret plutôt qu'en centièmes de pion.
+Évaluations : elles sont données du point de vue des Blancs (+1.00 = avantage d'environ un pion pour les Blancs, #3 = mat en 3 pour les Blancs, #-2 = mat en 2 pour les Noirs), accompagnées des chances de gain du camp qui joue le coup. Parle de préférence en chances de gain et en avantage concret plutôt qu'en centièmes de pion.
 
 Format de la réponse (champs JSON) :
-- played : ce que le joueur a joué et son intention apparente (2 à 3 phrases).
-- problem : pourquoi c'est problématique, en nommant la faiblesse tactique ou stratégique (2 à 4 phrases).
-- opponentIdea : comment l'adversaire pouvait exploiter l'erreur, en t'appuyant sur la variante punitive fournie (2 à 4 phrases).
-- bestMove : l'idée du meilleur coup de Stockfish et, si utile, ce qui le distingue des autres candidats fournis (2 à 4 phrases).
-- lesson : un principe réutilisable dans d'autres parties, formulé en une ou deux phrases, sans citer de coup de cette partie.
+- played : le coup joué, son intention apparente et, s'il y a lieu, sa place dans la théorie (2 à 3 phrases).
+- problem : pour un écart, pourquoi c'est problématique ; pour un bon coup, pourquoi il est bon (2 à 4 phrases).
+- opponentIdea : pour un écart, comment l'autre camp pouvait l'exploiter (variante punitive fournie) ; pour un bon coup, ce que le coup menace ou empêche et la réponse attendue (2 à 4 phrases).
+- bestMove : l'idée du meilleur coup de Stockfish ; si le coup joué est le meilleur, ce qui le distingue des autres candidats fournis (2 à 4 phrases).
+- lesson : un principe réutilisable dans d'autres parties, en une ou deux phrases, sans citer de coup de cette partie.
 - errorType, confidence : selon les règles ci-dessus.
 - movesReferenced : la liste de tous les coups que tu as cités, en SAN.
 
@@ -59,9 +68,9 @@ const PIECE_NAMES: Record<PieceSymbol, [singular: string, plural: string]> = {
 };
 const PIECE_ORDER: PieceSymbol[] = ["k", "q", "r", "b", "n", "p"];
 
-const COLOR_NAMES: Record<Color, string> = { w: "Blancs", b: "Noirs" };
-const PHASE_NAMES: Record<Phase, string> = { opening: "ouverture", middlegame: "milieu de partie", endgame: "finale" };
-const CLASSIFICATION_NAMES: Record<Classification, string> = {
+export const COLOR_NAMES: Record<Color, string> = { w: "Blancs", b: "Noirs" };
+export const PHASE_NAMES: Record<Phase, string> = { opening: "ouverture", middlegame: "milieu de partie", endgame: "finale" };
+export const CLASSIFICATION_NAMES: Record<Classification, string> = {
   forced: "coup forcé",
   best: "meilleur coup",
   excellent: "excellent",
@@ -70,7 +79,7 @@ const CLASSIFICATION_NAMES: Record<Classification, string> = {
   mistake: "erreur",
   blunder: "gaffe",
 };
-const THEME_NAMES: Record<Theme, string> = {
+export const THEME_NAMES: Record<Theme, string> = {
   tactics: "tactics (la variante punitive gagne du matériel ou mate)",
   hanging_piece: "hanging_piece (pièce laissée insuffisamment défendue et prise dans la variante)",
   missed_tactic: "missed_tactic (le meilleur coup gagnait du matériel ou matait)",
@@ -88,7 +97,22 @@ export type GameContext = {
   playerColor: Color;
   openingName: string | null;
   eco: string | null;
+  /** Théorie au niveau de ce coup ; absent = inconnu. */
+  theory?: MoveTheory;
 };
+
+function theoryLine(theory: MoveTheory | undefined): string | null {
+  if (!theory || theory.kind === "none") return null;
+  if (theory.kind === "book") {
+    const name = theory.name ? `${theory.name}${theory.eco ? ` (${theory.eco})` : ""}` : "ouverture connue";
+    return `Théorie : ce coup est un coup du livre d'ouvertures (${name}).`;
+  }
+  if (theory.kind === "out") {
+    const n = theory.since.ply;
+    return `Théorie : la partie a quitté le livre d'ouvertures au coup ${Math.ceil(n / 2)}${n % 2 === 1 ? "." : "..."} ${theory.since.san} ; ce coup n'est donc plus un coup théorique.`;
+  }
+  return `Théorie : ce coup est le premier de la partie à quitter le livre d'ouvertures${theory.lastBookName ? ` (dernière ligne connue : ${theory.lastBookName})` : ""}.`;
+}
 
 /** Pièces de chaque camp : « Roi : g1 ; Tours : a1, f1 ; … ». */
 export function describePieces(fen: string): Record<Color, string> {
@@ -121,7 +145,7 @@ function describeLine(fen: string, line: ValidatedLine, color: Color): string {
   const evaluation = formatEvaluation(line.evaluation);
   const win = formatWin(moverWinPercent(line.evaluation, color));
   const moves = line.san.length > 0 ? formatSanLine(fen, line.san) : "(aucun coup)";
-  return `${moves} — évaluation ${evaluation} (chances de gain du joueur : ${win})`;
+  return `${moves} — évaluation ${evaluation} (chances de gain du camp qui joue le coup : ${win})`;
 }
 
 function themesSection(themes: readonly Theme[]): string {
@@ -139,7 +163,11 @@ function themesSection(themes: readonly Theme[]): string {
 /** Message utilisateur : uniquement les données Stockfish validées de ce coup (§7). */
 export function buildUserMessage(move: MoveAnalysis, game: GameContext): string {
   const color = move.color;
-  const playerName = color === "w" ? game.white : game.black;
+  const playerName = game.playerColor === "w" ? game.white : game.black;
+  const moverName = color === "w" ? game.white : game.black;
+  const byPlayer = color === game.playerColor;
+  const flagged = isFlaggedMove(move);
+  const theory = theoryLine(game.theory);
   const pieces = describePieces(move.fenBefore);
   const opening = game.openingName ? `${game.openingName}${game.eco ? ` (${game.eco})` : ""}` : game.eco ?? "inconnue";
   const moveNumber = Math.ceil(move.ply / 2);
@@ -160,8 +188,10 @@ export function buildUserMessage(move: MoveAnalysis, game: GameContext): string 
 
   return [
     `Partie : ${game.white} (Blancs) contre ${game.black} (Noirs). Ouverture : ${opening}.`,
-    `Joueur à conseiller : ${playerName}, qui joue les ${COLOR_NAMES[color]}.`,
-    `Coup analysé : ${playedLabel} (demi-coup ${move.ply}), phase : ${PHASE_NAMES[move.phase]}.`,
+    `Joueur à conseiller : ${playerName}, qui joue les ${COLOR_NAMES[game.playerColor]}.`,
+    `Coup analysé : ${playedLabel} (demi-coup ${move.ply}), joué par ${byPlayer ? `le joueur (${moverName})` : `l'adversaire (${moverName})`}, phase : ${PHASE_NAMES[move.phase]}.`,
+    `Cadrage : ${flagged ? "Écart" : "Bon coup"}.`,
+    ...(theory ? [theory] : []),
     "",
     `FEN avant le coup : ${move.fenBefore}`,
     `Pièces des Blancs : ${pieces.w}`,
@@ -170,14 +200,14 @@ export function buildUserMessage(move: MoveAnalysis, game: GameContext): string 
     `Coup joué : ${move.san} — classification : ${CLASSIFICATION_NAMES[move.classification]}${move.missedWin ? ", gain manqué" : ""}${move.missedSave ? ", sauvetage manqué" : ""}.`,
     `Meilleur coup selon Stockfish : ${move.bestSan ?? "(non fourni)"}`,
     // sideToMove ne sert qu'aux positions matées (mate: 0) : le joueur est au trait avant, l'adversaire après.
-    `Évaluation avant le coup (avec le meilleur coup) : ${formatEvaluation(move.evalBefore, color)} (chances de gain du joueur : ${formatWin(move.winBefore)})`,
-    `Évaluation après le coup joué : ${formatEvaluation(move.evalAfter, color === "w" ? "b" : "w")} (chances de gain du joueur : ${formatWin(move.winAfter)})`,
+    `Évaluation avant le coup (avec le meilleur coup) : ${formatEvaluation(move.evalBefore, color)} (chances de gain du camp qui joue : ${formatWin(move.winBefore)})`,
+    `Évaluation après le coup joué : ${formatEvaluation(move.evalAfter, color === "w" ? "b" : "w")} (chances de gain du camp qui joue : ${formatWin(move.winAfter)})`,
     `Perte : ${move.loss.toFixed(1)} points de pourcentage de gain.`,
     "",
     "Coups candidats de Stockfish dans la position avant le coup (variantes validées) :",
     candidates,
     "",
-    "Meilleure réponse de l'adversaire après le coup joué (variante punitive) :",
+    `Meilleure réponse de l'autre camp après le coup joué (${flagged ? "variante punitive" : "suite attendue"}) :`,
     punish,
     "",
     themesSection(move.themes),

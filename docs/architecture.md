@@ -15,6 +15,7 @@ Chess.com API ──(serveur: /api/sync)──► games (Supabase)
                                             │
            bouton « Expliquer » ─► POST /api/explanations (serveur) ─► Claude Haiku 5.5
                                             │                          ─► explanations + ai_usage
+           bouton « Générer le bilan » ─► POST /api/game-report ─► Claude Haiku 5.5 ─► game_reports
              stats / tableau de bord ◄──────┤
              exercices (training) ◄─────────┘ (générés depuis move_analyses)
 ```
@@ -25,6 +26,12 @@ Chess.com API ──(serveur: /api/sync)──► games (Supabase)
 - Paramètres : `getSettings(supabase)` (`src/lib/db/settings.ts`), table `settings`.
 - Types de la base : `src/lib/db/database.types.ts` (`Tables<"games">`, etc.).
 - Types d'analyse partagés : `src/lib/analysis/types.ts`.
+
+## Ouvertures
+
+`src/lib/openings/` : livre Lichess (CC0) indexé par EPD, chargé côté serveur uniquement
+(`book.ts`) ; `identifyOpening` / `theoryForPly` (purs) situent chaque coup dans la théorie. La page
+`/games/[id]` calcule l'ouverture côté serveur et la passe au client.
 
 ## Contrats entre modules
 

@@ -93,3 +93,14 @@ describe("allowedMovesFor — candidats transmis", () => {
     expect(allowed.has("b3")).toBe(false);
   });
 });
+
+describe("verifyMoves — coups de tour", () => {
+  it("accepte un coup de tour autorisé (R = tour en SAN anglais, pas le roi français)", () => {
+    const allowedRook = new Set(["Re8", "Rxb4"]);
+    expect(verifyMoves(["Après 8... Re8 puis Rxb4, la tour est active."], [], allowedRook)).toMatchObject({ valid: true, invalid: [] });
+  });
+
+  it("rejette toujours la notation française des autres pièces", () => {
+    expect(verifyMoves(["Il fallait jouer Cf3."], [], new Set(["Nf3"])).invalid).toContain("Cf3");
+  });
+});

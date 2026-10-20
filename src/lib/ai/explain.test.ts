@@ -4,7 +4,8 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/env", () => ({ serverEnv: { anthropicApiKey: "test-key" } }));
 
 import Anthropic from "@anthropic-ai/sdk";
-import { explainMove, ExplainError, MAX_TOKENS, type MessagesClient } from "./explain";
+import { AiError, type MessagesClient } from "./call";
+import { explainMove, MAX_TOKENS } from "./explain";
 import type { ExplanationStore, UsageRecord } from "./store";
 import type { UsageSummary } from "./limits";
 import type { Explanation } from "./schema";
@@ -116,7 +117,7 @@ describe("explainMove", () => {
   it("enregistre une réponse tronquée (max_tokens) sans la stocker", async () => {
     const { store, usage, saved } = fakeStore();
     const { client, create } = fakeClient(message('{"played":"Avec f6', "max_tokens"));
-    await expect(run(store, client)).rejects.toBeInstanceOf(ExplainError);
+    await expect(run(store, client)).rejects.toBeInstanceOf(AiError);
     expect(create).toHaveBeenCalledTimes(1);
     expect(usage[0]).toMatchObject({ status: "error", error: "stop_reason: max_tokens" });
     expect(saved).toEqual([]);

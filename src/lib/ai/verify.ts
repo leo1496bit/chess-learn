@@ -7,8 +7,11 @@ import type { Explanation } from "./schema";
 
 // Regex de la skill, avec `(?!\w)` en fin : `\b` après « + » ou « # » couperait le symbole.
 const SAN_TOKEN = /\b(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?)(?!\w)/g;
-/** Notation française (C, F, T, D, R) : interdite, on exige le SAN anglais. */
-const FRENCH_PIECE_TOKEN = /\b[CFTDR][a-h]?[1-8]?x?[a-h][1-8](=[CFTD])?[+#]?(?![\w-])/g;
+/**
+ * Notation française (C, F, T, D) : interdite, on exige le SAN anglais. « R » (Roi) n'en fait pas
+ * partie : en SAN anglais c'est la tour, et le coup est alors vérifié comme les autres.
+ */
+const FRENCH_PIECE_TOKEN = /\b[CFTD][a-h]?[1-8]?x?[a-h][1-8](=[CFTD])?[+#]?(?![\w-])/g;
 const BARE_SQUARE = /^[a-h][1-8]$/;
 /** Mots qui précèdent une case (et non un coup de pion). */
 const SQUARE_CONTEXT = new Set([

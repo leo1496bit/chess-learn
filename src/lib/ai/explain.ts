@@ -1,98 +1,20 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { MoveAnalysis } from "@/lib/analysis/types";
-import { serverEnv } from "@/lib/env";
+import { AiError, callStructured, toAiError, type AttemptResult, type MessagesClient } from "./call";
 import { checkLimits, type AiLimitSettings } from "./limits";
-import { AI_MODEL, EMPTY_USAGE, estimateCost, type TokenUsage } from "./pricing";
+import { EMPTY_USAGE, estimateCost } from "./pricing";
 import { SYSTEM_PROMPT, buildRetryReminder, buildUserMessage, type GameContext } from "./prompt";
-import { ExplanationSchema, type ApiErrorBody, type Explanation, type ExplanationResponse } from "./schema";
+import { ExplanationSchema, type Explanation, type ExplanationResponse } from "./schema";
 import type { ExplanationStore, UsageStatus } from "./store";
 import { allowedMovesFor, verifyExplanation } from "./verify";
 
 export const MAX_TOKENS = 2500;
 
-/** Sous-ensemble du client Anthropic utilisé ici (remplacé par un double dans les tests). */
-export type MessagesClient = {
-  messages: { create(body: Anthropic.MessageCreateParamsNonStreaming): PromiseLike<Anthropic.Message> };
-};
-
-export function createAnthropicClient(): Anthropic {
-  return new Anthropic({ apiKey: serverEnv.anthropicApiKey, timeout: 30_000, maxRetries: 2 });
-}
-
-export class ExplainError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code: NonNullable<ApiErrorBody["code"]>,
-  ) {
-    super(message);
-    this.name = "ExplainError";
-  }
-}
-
 const outputFormat = zodOutputFormat(ExplanationSchema);
 
-type AttemptResult =
-  | { kind: "parsed"; explanation: Explanation; usage: TokenUsage }
-  | { kind: "invalid_output"; usage: TokenUsage; detail: string }
-  | { kind: "refused"; usage: TokenUsage }
-  | { kind: "truncated"; usage: TokenUsage };
-
-function usageOf(message: Anthropic.Message): TokenUsage {
-  return {
-    inputTokens: message.usage.input_tokens,
-    outputTokens: message.usage.output_tokens,
-    cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: message.usage.cache_creation_input_tokens ?? 0,
-  };
-}
-
-/** Erreur SDK → message actionnable. Les classes les plus précises d'abord. */
-function toExplainError(error: unknown): ExplainError {
-  if (error instanceof Anthropic.APIConnectionTimeoutError) {
-    return new ExplainError("Claude n'a pas répondu dans les 30 secondes. Réessaie dans un instant.", 503, "upstream");
-  }
-  if (error instanceof Anthropic.APIConnectionError) {
-    return new ExplainError("Connexion à l'API Anthropic impossible. Vérifie la connexion réseau du serveur puis réessaie.", 503, "upstream");
-  }
-  if (error instanceof Anthropic.RateLimitError) {
-    return new ExplainError("L'API Anthropic limite temporairement les requêtes. Réessaie dans une minute.", 503, "upstream");
-  }
-  if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
-    return new ExplainError("La clé API Anthropic est refusée. Vérifie ANTHROPIC_API_KEY dans .env.local.", 502, "upstream");
-  }
-  if (error instanceof Anthropic.InternalServerError) {
-    return new ExplainError("L'API Anthropic est momentanément indisponible. Réessaie dans quelques minutes.", 503, "upstream");
-  }
-  if (error instanceof Anthropic.APIError) {
-    return new ExplainError(`L'API Anthropic a renvoyé une erreur (${error.status ?? "inconnue"}). Réessaie plus tard.`, 502, "upstream");
-  }
-  return new ExplainError("Erreur inattendue pendant l'appel à Claude. Réessaie plus tard.", 502, "upstream");
-}
-
-async function callOnce(client: MessagesClient, userMessage: string): Promise<AttemptResult> {
-  const message = await client.messages.create({
-    model: AI_MODEL,
-    max_tokens: MAX_TOKENS,
-    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: userMessage }],
-    output_config: { effort: "low", format: outputFormat },
-  });
-  const usage = usageOf(message);
-
-  if (message.stop_reason === "refusal") return { kind: "refused", usage };
-  if (message.stop_reason === "max_tokens") return { kind: "truncated", usage };
-
-  const text = message.content.find((block) => block.type === "text");
-  if (!text) return { kind: "invalid_output", usage, detail: "réponse sans texte" };
-  try {
-    return { kind: "parsed", explanation: outputFormat.parse(text.text), usage };
-  } catch (error) {
-    return { kind: "invalid_output", usage, detail: error instanceof Error ? error.message.slice(0, 300) : "JSON invalide" };
-  }
-}
+const callOnce = (client: MessagesClient, userMessage: string): Promise<AttemptResult<Explanation>> =>
+  callStructured(client, { system: SYSTEM_PROMPT, user: userMessage, format: outputFormat, maxTokens: MAX_TOKENS });
 
 export type ExplainInput = {
   gameId: string;
@@ -122,7 +44,7 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
   const ensureAllowed = () => {
     const decision = checkLimits(settings, { callsToday, costMonth });
     if (!decision.allowed) {
-      throw new ExplainError(decision.message, 429, decision.reason === "disabled" ? "ai_disabled" : "limit_reached");
+      throw new AiError(decision.message, 429, decision.reason === "disabled" ? "ai_disabled" : "limit_reached");
     }
   };
   ensureAllowed();
@@ -130,12 +52,12 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
   const allowed = allowedMovesFor(move);
   const baseMessage = buildUserMessage(move, game);
 
-  const attempt = async (userMessage: string): Promise<AttemptResult> => {
-    let result: AttemptResult;
+  const attempt = async (userMessage: string): Promise<AttemptResult<Explanation>> => {
+    let result: AttemptResult<Explanation>;
     try {
       result = await callOnce(client, userMessage);
     } catch (error) {
-      const explainError = toExplainError(error);
+      const explainError = toAiError(error);
       await store.recordUsage({ status: "error", ...EMPTY_USAGE, costUsd: 0, error: explainError.message });
       throw explainError;
     }
@@ -154,7 +76,7 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
       status = "error";
       errorText = `sortie invalide : ${result.detail}`;
     } else {
-      const check = verifyExplanation(result.explanation, allowed);
+      const check = verifyExplanation(result.value, allowed);
       if (!check.valid) {
         status = "unverified";
         errorText = `coups non fournis : ${check.invalid.join(", ")}`;
@@ -166,17 +88,17 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
 
   const first = await attempt(baseMessage);
   if (first.kind === "refused") {
-    throw new ExplainError(
+    throw new AiError(
       "Claude a refusé d'expliquer ce coup. Consulte les variantes Stockfish affichées ou réessaie plus tard.",
       502,
       "upstream",
     );
   }
   if (first.kind === "truncated") {
-    throw new ExplainError("La réponse de Claude a été tronquée (limite de longueur). Réessaie : la génération varie d'un appel à l'autre.", 502, "upstream");
+    throw new AiError("La réponse de Claude a été tronquée (limite de longueur). Réessaie : la génération varie d'un appel à l'autre.", 502, "upstream");
   }
 
-  let explanation: Explanation | null = first.kind === "parsed" ? first.explanation : null;
+  let explanation: Explanation | null = first.kind === "parsed" ? first.value : null;
   const invalidMoves = explanation ? verifyExplanation(explanation, allowed).invalid : [];
   let verified = explanation !== null && invalidMoves.length === 0;
 
@@ -190,16 +112,16 @@ export async function explainMove(input: ExplainInput): Promise<ExplanationRespo
     }
     const second = await attempt(baseMessage + "\n" + buildRetryReminder(invalidMoves, allowed));
     if (second.kind === "parsed") {
-      const check = verifyExplanation(second.explanation, allowed);
+      const check = verifyExplanation(second.value, allowed);
       if (check.valid || explanation === null) {
-        explanation = second.explanation;
+        explanation = second.value;
         verified = check.valid;
       }
     }
   }
 
   if (!explanation) {
-    throw new ExplainError("Claude n'a pas renvoyé d'explication exploitable. Réessaie dans un instant.", 502, "invalid");
+    throw new AiError("Claude n'a pas renvoyé d'explication exploitable. Réessaie dans un instant.", 502, "invalid");
   }
 
   await store.saveExplanation(gameId, move.ply, explanation, verified);

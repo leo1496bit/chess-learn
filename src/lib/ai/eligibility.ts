@@ -1,7 +1,10 @@
 import type { MoveAnalysis } from "@/lib/analysis/types";
 
-/** Seuls les écarts du joueur sont expliqués : imprécision, erreur, gaffe ou gain manqué. */
-export function isExplainable(move: Pick<MoveAnalysis, "isPlayerMove" | "classification" | "missedWin">): boolean {
-  if (!move.isPlayerMove) return false;
+/**
+ * Tous les coups analysés (du joueur comme de l'adversaire) peuvent être expliqués. Ce prédicat
+ * choisit seulement le cadrage : un écart (imprécision, erreur, gaffe, gain manqué) est expliqué
+ * comme une erreur, les autres coups comme de bons coups.
+ */
+export function isFlaggedMove(move: Pick<MoveAnalysis, "classification" | "missedWin">): boolean {
   return move.missedWin || move.classification === "inaccuracy" || move.classification === "mistake" || move.classification === "blunder";
 }

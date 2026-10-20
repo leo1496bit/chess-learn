@@ -1,14 +1,14 @@
 // Schéma de sortie des explications (skill chess-analysis §7). Module pur, partagé client/serveur.
 import { z } from "zod";
 
-export const ERROR_TYPES = ["tactical", "strategic", "mixed", "uncertain"] as const;
+export const ERROR_TYPES = ["none", "tactical", "strategic", "mixed", "uncertain"] as const;
 export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
 
 export const ExplanationSchema = z.object({
-  played: z.string().describe("Ce que j'ai joué : le coup et son intention apparente, formulée comme une hypothèse."),
-  problem: z.string().describe("Pourquoi c'est problématique : la faiblesse tactique ou stratégique créée."),
-  opponentIdea: z.string().describe("Ce que l'adversaire pouvait faire : la réponse fournie qui exploite l'erreur."),
-  bestMove: z.string().describe("Le meilleur coup : l'idée derrière le coup recommandé par le moteur."),
+  played: z.string().describe("Le coup joué, son intention apparente (hypothèse) et sa place dans la théorie."),
+  problem: z.string().describe("Écart : pourquoi c'est problématique. Bon coup : pourquoi il est bon."),
+  opponentIdea: z.string().describe("Écart : comment l'autre camp l'exploite. Bon coup : ce qu'il menace ou empêche."),
+  bestMove: z.string().describe("L'idée du meilleur coup du moteur, ou ce qui distingue le coup joué des autres candidats."),
   lesson: z.string().describe("La leçon à retenir : un principe réutilisable dans d'autres parties."),
   errorType: z.enum(ERROR_TYPES),
   confidence: z.enum(CONFIDENCE_LEVELS),
@@ -28,10 +28,11 @@ export type CachedExplanation = { ply: number; explanation: Explanation; verifie
 /** Corps d'erreur des routes IA. `code` permet au client d'adapter le message (lien vers Paramètres…). */
 export type ApiErrorBody = {
   error: string;
-  code?: "unauthorized" | "not_found" | "not_explainable" | "limit_reached" | "ai_disabled" | "upstream" | "invalid";
+  code?: "unauthorized" | "not_found" | "limit_reached" | "ai_disabled" | "upstream" | "invalid";
 };
 
 export const ERROR_TYPE_LABELS: Record<ErrorType, string> = {
+  none: "Bon coup",
   tactical: "Erreur tactique",
   strategic: "Erreur stratégique",
   mixed: "Erreur tactique et stratégique",

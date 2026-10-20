@@ -130,19 +130,22 @@ export function createSupabaseExplanationStore(supabase: SupabaseServerClient): 
       if (error) throw new Error(`Enregistrement de l'explication impossible : ${error.message}`);
     },
 
-    async recordUsage(record) {
-      const { error } = await supabase.from("ai_usage").insert({
-        purpose: "move_explanation",
-        model: AI_MODEL,
-        status: record.status,
-        input_tokens: record.inputTokens,
-        output_tokens: record.outputTokens,
-        cache_read_tokens: record.cacheReadTokens,
-        cache_write_tokens: record.cacheWriteTokens,
-        cost_usd: record.costUsd,
-        error: record.error,
-      });
-      if (error) throw new Error(`Enregistrement de la consommation IA impossible : ${error.message}`);
-    },
+    recordUsage: (record) => recordAiUsage(supabase, "move_explanation", record),
   };
+}
+
+/** Une ligne ai_usage par appel à l'API (succès, erreur ou refus). */
+export async function recordAiUsage(supabase: SupabaseServerClient, purpose: string, record: UsageRecord): Promise<void> {
+  const { error } = await supabase.from("ai_usage").insert({
+    purpose,
+    model: AI_MODEL,
+    status: record.status,
+    input_tokens: record.inputTokens,
+    output_tokens: record.outputTokens,
+    cache_read_tokens: record.cacheReadTokens,
+    cache_write_tokens: record.cacheWriteTokens,
+    cost_usd: record.costUsd,
+    error: record.error,
+  });
+  if (error) throw new Error(`Enregistrement de la consommation IA impossible : ${error.message}`);
 }

@@ -6,6 +6,9 @@ import { ChessBoard, ARROW_COLORS, type BoardArrow } from "@/components/chess/ch
 import { EvalBar } from "@/components/chess/eval-bar";
 import { MoveList, type MoveListItem } from "@/components/chess/move-list";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GameReportPanel } from "@/components/ai/game-report-panel";
+import { theoryForPly, type OpeningReport } from "@/lib/openings/identify";
 import { toast } from "sonner";
 import { isErrorClassification } from "@/lib/analysis/classify";
 import { extractPositions } from "@/lib/analysis/game";
@@ -14,6 +17,7 @@ import { AnalyzePanel } from "./analyze-panel";
 import { EvalGraph } from "./eval-graph";
 import { GameSummary } from "./game-summary";
 import { MoveDetails } from "./move-details";
+import { OpeningSummary } from "./opening-summary";
 import { useGameAnalysis } from "./use-game-analysis";
 
 export type GameViewData = {
@@ -38,6 +42,14 @@ function arrowsFor(move: MoveAnalysis | undefined): BoardArrow[] {
   return [played, { from: move.bestUci.slice(0, 2), to: move.bestUci.slice(2, 4), color: ARROW_COLORS.best }];
 }
 
+function theoryItem(opening: OpeningReport | null, ply: number): MoveListItem["theory"] {
+  if (!opening) return undefined;
+  const theory = theoryForPly(opening, ply);
+  if (theory.kind === "book") return { kind: "book", name: theory.name };
+  if (theory.kind === "deviation") return { kind: "deviation" };
+  return undefined;
+}
+
 export function GameAnalysisView({
   game,
   initialMoves,
@@ -45,8 +57,11 @@ export function GameAnalysisView({
   analyzedWith: initialAnalyzedWith,
   engineSettings,
   thresholds,
+  opening,
 }: {
   game: GameViewData;
+  /** Ouverture identifiée côté serveur par le livre d'ouvertures (null si le PGN est illisible). */
+  opening: OpeningReport | null;
   initialMoves: MoveAnalysis[] | null;
   initialSummary: GameAnalysisSummary | null;
   analyzedWith: EngineSettings | null;
@@ -65,6 +80,7 @@ export function GameAnalysisView({
     initialMoves && initialSummary ? { moves: initialMoves, summary: initialSummary, settings: initialAnalyzedWith } : null,
   );
   const [ply, setPly] = useState(0);
+  const [tab, setTab] = useState<"move" | "report">("move");
   const [orientation, setOrientation] = useState<"white" | "black">(game.playerColor === "w" ? "white" : "black");
 
   const { state, start, cancel } = useGameAnalysis((result) => {
@@ -119,7 +135,14 @@ export function GameAnalysisView({
     classification: moves?.[i]?.classification,
     missedWin: moves?.[i]?.missedWin,
     isPlayerMove: m.color === game.playerColor,
+    theory: theoryItem(opening, m.ply),
   }));
+  const sanByPly = new Map(parsed.moves.map((m) => [m.ply, m.san]));
+  // Depuis le bilan : afficher le coup sur l'échiquier et son détail.
+  const showPly = (target: number) => {
+    go(target);
+    setTab("move");
+  };
   const evaluation = moves ? (ply === 0 ? moves[0]?.evalBefore : current?.evalAfter) ?? null : null;
   const sideToMove = (fens[ply]?.split(" ")[1] ?? "w") as Color;
   const playedSquares = ply > 0 ? [parsed.moves[ply - 1].uci.slice(0, 2), parsed.moves[ply - 1].uci.slice(2, 4)] : [];
@@ -138,6 +161,7 @@ export function GameAnalysisView({
 
   return (
     <div className="space-y-6">
+      {opening ? <OpeningSummary opening={opening} onSelectPly={showPly} /> : null}
       {analysis ? <GameSummary summary={analysis.summary} playerName={playerName} opponentName={opponentName} /> : null}
       <AnalyzePanel
         state={state}
@@ -192,16 +216,27 @@ export function GameAnalysisView({
           ) : null}
         </div>
 
-        <div className="space-y-6">
-          {moves ? (
-            <div className="rounded-lg border bg-card p-4 sm:p-5">
-              <MoveDetails move={current ?? null} gameId={game.id} />
+        <Tabs value={tab} onValueChange={(value) => setTab(value === "report" ? "report" : "move")} className="gap-4">
+          <TabsList>
+            <TabsTrigger value="move">Coup par coup</TabsTrigger>
+            <TabsTrigger value="report">Bilan de la partie</TabsTrigger>
+          </TabsList>
+          <TabsContent value="move" className="space-y-6">
+            {moves ? (
+              <div className="rounded-lg border bg-card p-4 sm:p-5">
+                <MoveDetails move={current ?? null} gameId={game.id} theory={opening && ply > 0 ? theoryForPly(opening, ply) : null} />
+              </div>
+            ) : null}
+            <div className="rounded-lg border bg-card">
+              <MoveList moves={listItems} currentPly={ply} onSelect={go} className="max-h-[28rem]" />
             </div>
-          ) : null}
-          <div className="rounded-lg border bg-card">
-            <MoveList moves={listItems} currentPly={ply} onSelect={go} className="max-h-[28rem]" />
-          </div>
-        </div>
+          </TabsContent>
+          <TabsContent value="report">
+            <div className="rounded-lg border bg-card p-4 sm:p-5">
+              <GameReportPanel gameId={game.id} analyzed={analysis !== null} sanByPly={sanByPly} onSelectPly={showPly} />
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

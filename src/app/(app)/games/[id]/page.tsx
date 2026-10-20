@@ -7,6 +7,9 @@ import { parseGameSummary, rowToMoveAnalysis } from "@/lib/analysis/rows";
 import type { Color, MoveAnalysis } from "@/lib/analysis/types";
 import { requireUser } from "@/lib/db/server";
 import { getSettings } from "@/lib/db/settings";
+import { extractPositions } from "@/lib/analysis/game";
+import { OPENING_BOOK } from "@/lib/openings/book";
+import { identifyOpening, type OpeningReport } from "@/lib/openings/identify";
 
 export const metadata: Metadata = { title: "Analyse de la partie" };
 
@@ -43,12 +46,20 @@ export default async function Page({ params }: PageProps<"/games/[id]">) {
   const hasAnalysis = moves !== null && summary !== null;
   const playerColor: Color = game.player_color === "b" ? "b" : "w";
 
+  // Ouverture identifiée côté serveur : le livre (≈ 1 Mo) n'est jamais envoyé au navigateur.
+  let opening: OpeningReport | null = null;
+  try {
+    const { fens, moves: gameMoves } = extractPositions(game.pgn);
+    opening = identifyOpening(fens, gameMoves.map((m) => m.san), playerColor, OPENING_BOOK);
+  } catch {
+    opening = null;
+  }
+
   const date = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date(game.end_time));
   const rating = (r: number | null) => (r ? ` (${r})` : "");
   const description = (
     <>
       {RESULT_LABELS[game.result] ?? game.result} avec les {playerColor === "w" ? "Blancs" : "Noirs"}, le {date}.
-      {game.opening_name ? ` Ouverture : ${game.opening_name}.` : null}
       {game.chesscom_url ? (
         <>
           {" "}
@@ -75,6 +86,7 @@ export default async function Page({ params }: PageProps<"/games/[id]">) {
         analyzedWith={hasAnalysis && analysisRes.data ? { depth: analysisRes.data.depth, multipv: analysisRes.data.multipv } : null}
         engineSettings={{ depth: settings.engineDepth, multipv: settings.engineMultipv }}
         thresholds={settings.thresholds}
+        opening={opening}
       />
     </>
   );

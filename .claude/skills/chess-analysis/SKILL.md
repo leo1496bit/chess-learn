@@ -100,12 +100,13 @@ Toujours distinguer `tactical` (tactics, hanging_piece, missed_tactic, king_safe
 
 - Convertir chaque PV UCI en SAN en rejouant les coups sur une instance `Chess(fen)`. **Arrêter la variante au premier coup illégal** et la tronquer (journaliser l'anomalie).
 - Limiter les variantes affichées/envoyées à 8 demi-coups.
-- Toute réponse de l'IA est vérifiée : extraire les tokens SAN (`/\b(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?)\b/g`) et vérifier qu'ils appartiennent à l'ensemble autorisé (coup joué, meilleur coup, coups des PV transmises). Sinon : une nouvelle tentative avec rappel des coups autorisés, puis, si l'échec persiste, afficher l'explication avec un avertissement « non vérifiée » et ne pas la mettre en cache comme fiable.
+- Toute réponse de l'IA est vérifiée (la notation française interdite est C, F, T, D — pas R, qui est la tour en SAN anglais) : extraire les tokens SAN (`/\b(O-O(-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?)\b/g`) et vérifier qu'ils appartiennent à l'ensemble autorisé (coup joué, meilleur coup, coups des PV transmises). Sinon : une nouvelle tentative avec rappel des coups autorisés, puis, si l'échec persiste, afficher l'explication avec un avertissement « non vérifiée » et ne pas la mettre en cache comme fiable.
 
 ## 7. Explications avec Claude Haiku 5.5
 
 - Serveur uniquement (`src/lib/ai/`, route `POST /api/explanations`), `@anthropic-ai/sdk`, modèle **`claude-haiku-5-5`**, clé `ANTHROPIC_API_KEY` lue côté serveur. Jamais de `NEXT_PUBLIC_` pour une clé.
-- Déclenchées **à la demande** (bouton « Expliquer ») et uniquement pour `inaccuracy`/`mistake`/`blunder`/`missedWin` — jamais en lot automatique sur toute une partie.
+- Déclenchées **à la demande** (bouton « Expliquer ce coup »), pour **tous les coups** analysés, du joueur comme de l'adversaire — jamais en lot automatique sur toute une partie. Le cadrage dépend du coup (`isFlaggedMove`) : « Écart » (imprécision, erreur, gaffe, gain manqué) → en quoi c'est mauvais ; « Bon coup » → en quoi c'est bon, ce qu'il menace ou empêche (`errorType: "none"`).
+- Le serveur ajoute la place du coup dans la théorie (`theoryForPly`, §11) : coup du livre (nom exact), sortie de théorie, ou coup joué après la sortie (« hors théorie depuis 3. Be3 »). L'IA ne nomme une ouverture que si elle est fournie.
 - Appel : `client.messages.parse({ model: "claude-haiku-5-5", max_tokens: 2500, output_config: { effort: "low", format: zodOutputFormat(ExplanationSchema) }, system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }], messages: [...] })`. Pas de `temperature`, pas de `budget_tokens`, pas de prefill (refusés par Haiku 5.5). Vérifier `stop_reason` (`refusal`, `max_tokens`) avant `parsed_output`. Erreurs SDK typées (`Anthropic.RateLimitError`, `APIConnectionTimeoutError`, `APIError`), timeout 30 s, `maxRetries: 2`.
 - **Données transmises (et rien d'autre)** : FEN avant le coup, liste des pièces par camp, camp du joueur, coup joué (SAN), meilleur coup (SAN), 3 coups candidats avec évaluation et PV SAN (≤ 8 demi-coups), PV punitive après le coup joué, évaluations avant/après (texte + win %), perte, classification, phase, thèmes, numéro du coup, ouverture si connue.
 - **Sortie (schéma Zod)** :
@@ -136,6 +137,19 @@ Toujours distinguer `tactical` (tactics, hanging_piece, missed_tactic, king_safe
 
 Calculées uniquement à partir des parties importées et analysées. Afficher « données insuffisantes » en dessous de 10 parties (ou 5 occurrences pour un thème) au lieu de tirer une conclusion.
 
+## 11. Ouvertures et théorie
+
+- Livre : données Lichess `lichess-org/chess-openings` (CC0) dans `data/openings/*.tsv`, compilées par `npm run build:openings` en `src/lib/openings/book.json` (≈ 1 Mo), indexé par **EPD** (FEN sans compteurs : reconnaît les transpositions). Chargé **uniquement côté serveur** (`src/lib/openings/book.ts`, `server-only`).
+- `identifyOpening(fens, sans, playerColor, book)` (pur, `src/lib/openings/identify.ts`) : nom le plus précis atteint, famille / variante, gambit éventuel (nom contenant « Gambit »), nombre de demi-coups théoriques consécutifs, **sortie de théorie** (demi-coup, coup, camp, joueur ou adversaire, dernière ligne connue), et statut de chaque demi-coup.
+- Ne jamais nommer une ouverture, un gambit ou un piège qui ne vient pas du livre.
+
+## 12. Bilan de partie
+
+- À la demande (bouton « Générer le bilan »), mis en cache dans `game_reports` (clé `game_id, prompt_version, model`) avec l'empreinte `analysis_created_at` : un bilan est **périmé** si la partie a été réanalysée depuis (affiché comme tel, régénérable).
+- Données transmises (`buildReportInput`, pur) : partie, précision et décompte des écarts par camp et par phase, ouverture (§11) avec la sortie de théorie et les coups du joueur qui suivent, thèmes des écarts du joueur, et **au plus 12 moments clés** (écarts du joueur les plus coûteux + réponses du joueur qui n'ont pas puni une erreur adverse), chacun avec meilleur coup, variante et suite punitive (≤ 6 demi-coups). L'IA ne peut citer que les coups et demi-coups transmis.
+- Sortie (`GameReportSchema`) : résumé, ouverture (appréciation, lacune théorique ou null, conseil d'étude), erreurs tactiques, erreurs stratégiques, occasions manquées, finale, points forts, plan de travail (catégorie, titre actionnable, raison, demi-coups). Vérification sur le **texte écrit** (pas de liste déclarée) et sur les demi-coups ; une nouvelle tentative avec rappel si invalide. Coût typique ≈ 0,0013 $.
+- Une lacune théorique n'est affirmée que si les données la montrent (sortie du livre par le joueur suivie d'une perte, ou réponse imprécise à une sortie adverse).
+
 ## Checklist avant de terminer une tâche d'analyse
 
 - [ ] Scores normalisés en point de vue Blancs, conversion joueur au moment de classer
@@ -144,4 +158,5 @@ Calculées uniquement à partir des parties importées et analysées. Afficher �
 - [ ] Toutes les variantes validées par chess.js
 - [ ] Aucune donnée échiquéenne produite par l'IA ; réponse IA vérifiée
 - [ ] Appel IA uniquement à la demande, avec cache, limites et suivi `ai_usage`
+- [ ] Noms d'ouvertures et de gambits uniquement issus du livre (§11), calculés côté serveur
 - [ ] Tests unitaires mis à jour pour les fonctions pures modifiées

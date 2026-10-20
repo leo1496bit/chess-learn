@@ -1,11 +1,25 @@
 import { z } from "zod";
 import { getAuthorizedUser } from "@/lib/db/server";
 import { getSettings } from "@/lib/db/settings";
-import { createAnthropicClient, explainMove, ExplainError } from "@/lib/ai/explain";
-import { isExplainable } from "@/lib/ai/eligibility";
+import { AiError, createAnthropicClient } from "@/lib/ai/call";
+import { explainMove } from "@/lib/ai/explain";
 import { rowToMoveAnalysis } from "@/lib/analysis/rows";
 import { createSupabaseExplanationStore, loadGameExplanations } from "@/lib/ai/store";
 import type { ApiErrorBody } from "@/lib/ai/schema";
+import { extractPositions } from "@/lib/analysis/game";
+import { OPENING_BOOK } from "@/lib/openings/book";
+import { identifyOpening, theoryForPly, type MoveTheory } from "@/lib/openings/identify";
+import type { Color } from "@/lib/analysis/types";
+
+/** Place du coup dans la théorie, recalculée depuis le PGN et le livre (jamais fournie par le client). */
+function theoryOf(pgn: string, playerColor: Color, ply: number): MoveTheory {
+  try {
+    const { fens, moves } = extractPositions(pgn);
+    return theoryForPly(identifyOpening(fens, moves.map((m) => m.san), playerColor, OPENING_BOOK), ply);
+  } catch {
+    return { kind: "none" };
+  }
+}
 
 const PostBodySchema = z.object({
   gameId: z.uuid(),
@@ -36,7 +50,7 @@ export async function GET(request: Request) {
   }
 }
 
-/** Explique un coup du joueur à la demande. Les données échiquéennes sont relues en base. */
+/** Explique un coup (du joueur ou de l'adversaire) à la demande. Les données échiquéennes sont relues en base. */
 export async function POST(request: Request) {
   const auth = await getAuthorizedUser();
   if (!auth) return UNAUTHORIZED();
@@ -56,7 +70,7 @@ export async function POST(request: Request) {
 
   try {
     const [gameResult, moveResult] = await Promise.all([
-      supabase.from("games").select("white, black, player_color, opening_name, eco").eq("id", gameId).maybeSingle(),
+      supabase.from("games").select("white, black, player_color, opening_name, eco, pgn").eq("id", gameId).maybeSingle(),
       supabase.from("move_analyses").select("*").eq("game_id", gameId).eq("ply", ply).maybeSingle(),
     ]);
     if (gameResult.error) throw new Error(gameResult.error.message);
@@ -67,15 +81,8 @@ export async function POST(request: Request) {
     }
 
     const move = rowToMoveAnalysis(moveResult.data);
-    if (!isExplainable(move)) {
-      return errorResponse(
-        422,
-        "Seuls tes imprécisions, erreurs, gaffes et gains manqués peuvent être expliqués.",
-        "not_explainable",
-      );
-    }
-
     const game = gameResult.data;
+    const playerColor: Color = game.player_color === "b" ? "b" : "w";
     const settings = await getSettings(supabase);
     const result = await explainMove({
       gameId,
@@ -83,9 +90,10 @@ export async function POST(request: Request) {
       game: {
         white: game.white,
         black: game.black,
-        playerColor: game.player_color === "b" ? "b" : "w",
+        playerColor,
         openingName: game.opening_name,
         eco: game.eco,
+        theory: theoryOf(game.pgn, playerColor, ply),
       },
       settings,
       store: createSupabaseExplanationStore(supabase),
@@ -93,7 +101,7 @@ export async function POST(request: Request) {
     });
     return Response.json(result);
   } catch (error) {
-    if (error instanceof ExplainError) return errorResponse(error.status, error.message, error.code);
+    if (error instanceof AiError) return errorResponse(error.status, error.message, error.code);
     console.error("[explanations] POST", error);
     return errorResponse(500, "Erreur interne pendant la génération de l'explication. Réessaie dans un instant.");
   }

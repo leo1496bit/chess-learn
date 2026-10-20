@@ -40,8 +40,8 @@ describe("buildUserMessage", () => {
     expect(message).toContain(`FEN avant le coup : ${BLACK_MISTAKE.fenBefore}`);
     expect(message).toContain("Coup joué : f6 — classification : erreur");
     expect(message).toContain("Meilleur coup selon Stockfish : Nc6");
-    expect(message).toContain("+0.30 (chances de gain du joueur : 47 %)");
-    expect(message).toContain("+1.60 (chances de gain du joueur : 36 %)");
+    expect(message).toContain("+0.30 (chances de gain du camp qui joue : 47 %)");
+    expect(message).toContain("+1.60 (chances de gain du camp qui joue : 36 %)");
     expect(message).toContain("3. Nxe5 fxe5 4. Qh5+ Ke7 5. Qxe5+ Kf7 6. Bc4+");
     expect(message).toContain("Ouverture : Défense Damiano (C40)");
     expect(message).toContain("phase : ouverture");
@@ -79,5 +79,36 @@ describe("buildRetryReminder", () => {
     const reminder = buildRetryReminder(["Bxf7+"], ["Nc6", "f6"]);
     expect(reminder).toContain("Bxf7+");
     expect(reminder).toContain("Nc6, f6");
+  });
+});
+
+describe("buildUserMessage — cadrage et théorie", () => {
+  it("cadre un bon coup de l'adversaire et nomme l'auteur", () => {
+    const message = buildUserMessage({ ...BLACK_MISTAKE, classification: "best", missedWin: false, isPlayerMove: false }, {
+      ...GAME,
+      playerColor: "w",
+    });
+    expect(message).toContain("Cadrage : Bon coup.");
+    expect(message).toContain("joué par l'adversaire (Leny_l)");
+    expect(message).toContain("(suite attendue)");
+  });
+
+  it("indique un coup du livre avec le nom fourni", () => {
+    const message = buildUserMessage(BLACK_MISTAKE, { ...GAME, theory: { kind: "book", name: "Damiano Defense", eco: "C40" } });
+    expect(message).toContain("Théorie : ce coup est un coup du livre d'ouvertures (Damiano Defense (C40)).");
+  });
+
+  it("indique la sortie de théorie avec la dernière ligne connue", () => {
+    const message = buildUserMessage(BLACK_MISTAKE, { ...GAME, theory: { kind: "deviation", lastBookName: "King's Knight Opening" } });
+    expect(message).toContain("premier de la partie à quitter le livre d'ouvertures (dernière ligne connue : King's Knight Opening)");
+  });
+
+  it("situe un coup joué après la sortie du livre", () => {
+    const message = buildUserMessage(BLACK_MISTAKE, { ...GAME, theory: { kind: "out", since: { ply: 5, san: "Be3" } } });
+    expect(message).toContain("la partie a quitté le livre d'ouvertures au coup 3. Be3 ; ce coup n'est donc plus un coup théorique.");
+  });
+
+  it("n'ajoute aucune ligne de théorie quand elle est inconnue", () => {
+    expect(buildUserMessage(BLACK_MISTAKE, GAME)).not.toContain("Théorie :");
   });
 });

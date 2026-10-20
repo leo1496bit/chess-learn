@@ -12,6 +12,8 @@ export type MoveListItem = {
   missedWin?: boolean;
   /** Coup du joueur : mis en valeur dans la liste. */
   isPlayerMove?: boolean;
+  /** Place dans la théorie : coup du livre d'ouvertures, ou premier coup qui en sort. */
+  theory?: { kind: "book"; name: string | null } | { kind: "deviation" };
 };
 
 const ANNOTATION_TEXT: Partial<Record<Classification, string>> = {
@@ -29,7 +31,8 @@ function annotation(item: MoveListItem): { symbol: string; label: string; text: 
 
 /**
  * Feuille de notation : une ligne par numéro de coup, Blancs puis Noirs.
- * Les imprécisions, erreurs, gaffes et gains manqués portent leur symbole d'annotation.
+ * Les imprécisions, erreurs, gaffes et gains manqués portent leur symbole d'annotation ; les coups
+ * théoriques sont teintés et la sortie de théorie est marquée d'un filet.
  * `currentPly` 0 = position initiale.
  */
 export function MoveList({
@@ -84,19 +87,29 @@ export function MoveList({
 function MoveCell({ item, active, onSelect }: { item?: MoveListItem; active: boolean; onSelect: (ply: number) => void }) {
   if (!item) return <span />;
   const meta = annotation(item);
+  const theoryLabel =
+    item.theory?.kind === "book"
+      ? `Coup théorique${item.theory.name ? ` : ${item.theory.name}` : ""}`
+      : item.theory?.kind === "deviation"
+        ? "Sortie de la théorie"
+        : undefined;
   return (
     <button
       type="button"
       data-ply={item.ply}
       aria-current={active ? "step" : undefined}
+      title={theoryLabel}
       onClick={() => onSelect(item.ply)}
       className={cn(
-        "flex items-baseline gap-0.5 px-2 py-1.5 text-left transition-colors hover:bg-accent",
+        "flex items-baseline gap-0.5 border-l-2 border-transparent px-2 py-1.5 text-left transition-colors hover:bg-accent",
         item.isPlayerMove ? "font-semibold text-foreground" : "text-foreground/80",
+        item.theory?.kind === "book" && "bg-board-light/45",
+        item.theory?.kind === "deviation" && "border-cls-inaccuracy",
         active && "bg-primary text-primary-foreground hover:bg-primary",
       )}
     >
       <span>{item.san}</span>
+      {theoryLabel ? <span className="sr-only"> ({theoryLabel})</span> : null}
       {meta ? (
         <span
           title={meta.label}

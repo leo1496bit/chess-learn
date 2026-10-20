@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ClassificationBadge, MissedWinBadge } from "@/components/chess/classification-badge";
 import { cn } from "@/lib/utils";
 import type { MoveAnalysis } from "@/lib/analysis/types";
-import { isExplainable } from "@/lib/ai/eligibility";
+import { isFlaggedMove } from "@/lib/ai/eligibility";
 import {
   CONFIDENCE_LABELS,
   ERROR_TYPE_LABELS,
@@ -100,16 +100,27 @@ export function invalidateExplanationCache(gameId: string): void {
   }
 }
 
-const SECTIONS: { key: keyof Pick<Explanation, "played" | "problem" | "opponentIdea" | "bestMove" | "lesson">; title: string }[] = [
-  { key: "played", title: "Ce que j'ai joué" },
-  { key: "problem", title: "Pourquoi c'est problématique" },
-  { key: "opponentIdea", title: "Ce que l'adversaire pouvait faire" },
-  { key: "bestMove", title: "Le meilleur coup" },
-  { key: "lesson", title: "La leçon à retenir" },
-];
+type SectionKey = keyof Pick<Explanation, "played" | "problem" | "opponentIdea" | "bestMove" | "lesson">;
+
+/** Intitulés selon le cadrage (écart ou bon coup) et l'auteur du coup. */
+function sectionsFor(flagged: boolean, byPlayer: boolean): { key: SectionKey; title: string }[] {
+  return [
+    { key: "played", title: byPlayer ? "Ce que j'ai joué" : "Ce que l'adversaire a joué" },
+    { key: "problem", title: flagged ? "Pourquoi c'est problématique" : "Pourquoi c'est un bon coup" },
+    {
+      key: "opponentIdea",
+      title: flagged
+        ? byPlayer
+          ? "Ce que l'adversaire pouvait faire"
+          : "Comment j'aurais pu en profiter"
+        : "Ce que le coup menace ou empêche",
+    },
+    { key: "bestMove", title: flagged ? "Le meilleur coup" : "Les autres candidats" },
+    { key: "lesson", title: "La leçon à retenir" },
+  ];
+}
 
 export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveAnalysis }) {
-  const explainable = isExplainable(move);
   const key = `${gameId}:${move.ply}`;
   // L'état est rattaché au coup affiché : changer de coup repart de « chargement du cache ».
   const [entry, setEntry] = useState<{ key: string; state: State } | null>(null);
@@ -120,7 +131,6 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
 
   useEffect(() => {
     currentKey.current = key;
-    if (!explainable) return;
     let active = true;
     const running = inFlight.get(key);
     if (running) {
@@ -149,15 +159,7 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
     return () => {
       active = false;
     };
-  }, [key, gameId, move.ply, explainable]);
-
-  if (!explainable) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Les explications IA concernent tes imprécisions, erreurs, gaffes et gains manqués.
-      </p>
-    );
-  }
+  }, [key, gameId, move.ply]);
 
   const previous = state.kind === "ready" ? state.data : state.kind === "error" || state.kind === "generating" ? state.previous : null;
 
@@ -215,7 +217,7 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
               <Button asChild size="sm" variant="outline">
                 <Link href="/settings">Ouvrir les paramètres</Link>
               </Button>
-            ) : state.code !== "not_explainable" && state.code !== "not_found" ? (
+            ) : state.code !== "not_found" ? (
               <Button size="sm" variant="outline" onClick={explain}>
                 Réessayer
               </Button>
@@ -224,14 +226,16 @@ export function ExplanationPanel({ gameId, move }: { gameId: string; move: MoveA
         </div>
       ) : null}
 
-      {state.kind === "ready" ? <ExplanationBody data={state.data} bestSan={move.bestSan} /> : null}
-      {state.kind === "error" && state.previous ? <ExplanationBody data={state.previous} bestSan={move.bestSan} /> : null}
+      {state.kind === "ready" ? <ExplanationBody data={state.data} move={move} /> : null}
+      {state.kind === "error" && state.previous ? <ExplanationBody data={state.previous} move={move} /> : null}
     </section>
   );
 }
 
-function ExplanationBody({ data, bestSan }: { data: Loaded; bestSan: string | null }) {
+function ExplanationBody({ data, move }: { data: Loaded; move: MoveAnalysis }) {
   const { explanation, verified, cached } = data;
+  const flagged = isFlaggedMove(move);
+  const bestSan = flagged ? move.bestSan : null;
   return (
     <div className="space-y-4">
       <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
@@ -250,7 +254,7 @@ function ExplanationBody({ data, bestSan }: { data: Loaded; bestSan: string | nu
       ) : null}
 
       <dl className="divide-y border-l-2 border-primary/20">
-        {SECTIONS.map(({ key, title }) => (
+        {sectionsFor(flagged, move.isPlayerMove).map(({ key, title }) => (
           <div key={key} className="space-y-1 py-3 pl-4 first:pt-0 last:pb-0">
             <dt className="text-sm font-semibold text-primary">
               {title}
