@@ -20,6 +20,11 @@ export const serverEnv = {
     if (typeof window !== "undefined") throw new Error("ANTHROPIC_API_KEY lue côté client");
     return required("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY);
   },
+  /** Optionnel : sans jeton, la construction n'utilise que les parties de Leonel et le livre. */
+  get lichessToken(): string | undefined {
+    if (typeof window !== "undefined") throw new Error("LICHESS_TOKEN lu côté client");
+    return process.env.LICHESS_TOKEN || undefined;
+  },
   get allowedEmail() {
     return required("ALLOWED_EMAIL", process.env.ALLOWED_EMAIL);
   },
