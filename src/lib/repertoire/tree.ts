@@ -2,6 +2,15 @@
 // (analyses Stockfish en cache, réponses de ses parties, explorateur Lichess). Aucun calcul moteur ici :
 // les positions manquantes sont renvoyées dans `needs` / `needsReplies`, et l'appelant rappelle
 // `buildTree` une fois qu'elles sont disponibles. L'arbre est recalculé de zéro à chaque appel.
+//
+// Élagage par fréquence sur tout l'arbre (au plus MAX_BRANCHES feuilles), expansion « meilleur d'abord » :
+// chaque nœud adverse ouvert garde sa réponse la plus fréquente (sans coût, elle prolonge le chemin) ; ses
+// autres réponses (≤ MAX_REPLIES) entrent dans une file globale triée par source (chemins faits uniquement
+// de réponses de ses parties avant ceux qui passent par l'explorateur seul), puis par poids (produit des
+// parts des réponses le long du chemin : part dans ses parties pour une réponse propre, part de
+// l'explorateur sinon). Une réponse supplémentaire ajoute une feuille tant que le budget le permet. Le poids
+// ne fait que décroître en descendant : l'ordre est global, et seules les réponses retenues sont développées
+// (chaque nœud coûte des analyses dans le navigateur). Un chemin en attente de données compte pour une feuille.
 import { Chess } from "chess.js";
 import { playUci } from "@/lib/analysis/lines";
 import { terminalAnalysis } from "@/lib/analysis/terminal";
@@ -10,7 +19,7 @@ import { moverWinPercent } from "@/lib/analysis/win";
 import type { ExplorerResult } from "@/lib/lichess/explorer";
 import { toEpd, type OpeningBook } from "@/lib/openings/identify";
 import { branchEnds, candidatesNeedingEval, choosePlayerMove, lineKind, playerCandidates } from "./choose";
-import { MAX_BRANCHES, OWN_MIN_GAMES } from "./constants";
+import { MAX_BRANCHES, MAX_REPLIES, OWN_MIN_GAMES } from "./constants";
 import { mergeReplies, takeReplies, type Reply } from "./replies";
 
 /** `multipv` : celui de la ligne pour une position où Leonel joue, 1 pour un candidat ou une fin de branche. */
@@ -50,7 +59,32 @@ export type TreeRoot = {
   bookName: string | null;
 };
 
-type Path = { uci: string[]; san: string[]; lastReply: Reply | null };
+type Path = {
+  uci: string[];
+  san: string[];
+  lastReply: Reply | null;
+  /** Produit des parts des réponses adverses du chemin. */
+  weight: number;
+  /** Une réponse du chemin vient de l'explorateur seul. */
+  explorerOnly: boolean;
+  /** Rang de chaque réponse adverse à son nœud : ordre final des branches (celui de l'arbre). */
+  order: number[];
+};
+
+/** Réponse adverse supplémentaire en attente d'une place dans le budget. */
+type Extra = { fen: string; ply: number; path: Path; seq: number };
+
+/** `a` passe avant `b` : parties propres d'abord, puis poids, puis ordre d'insertion (déterministe). */
+function ranksBefore(a: Extra, b: Extra): boolean {
+  if (a.path.explorerOnly !== b.path.explorerOnly) return !a.path.explorerOnly;
+  if (a.path.weight !== b.path.weight) return a.path.weight > b.path.weight;
+  return a.seq < b.seq;
+}
+
+function compareOrder(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return a.length - b.length;
+}
 
 /** % de gain de `color` ; une position matée (`mate: 0`) est perdue pour le camp au trait. */
 function winFor(evaluation: Evaluation, color: Color, fen: string): number {
@@ -66,9 +100,11 @@ function mainEvaluation(analysis: PositionAnalysis): Evaluation | null {
 export function buildTree(root: TreeRoot, deps: TreeDeps, multipv: number): TreeResult {
   const needs = new Map<string, AnalysisNeed>();
   const needsReplies = new Set<string>();
-  const branches: BuiltBranch[] = [];
+  const branches: (BuiltBranch & { order: number[] })[] = [];
+  const extras: Extra[] = [];
+  let seq = 0;
   const opponent: Color = root.playerColor === "w" ? "b" : "w";
-  let open = 1; // chemins ouverts (feuilles futures), budget MAX_BRANCHES
+  let open = 1; // chemins ouverts (feuilles futures, y compris en attente), budget MAX_BRANCHES
 
   /** Analyse en cache, ou terminale par les règles ; `undefined` (et besoin noté) si absente. */
   function analysisOf(fen: string, mpv: number): PositionAnalysis | undefined {
@@ -88,6 +124,7 @@ export function buildTree(root: TreeRoot, deps: TreeDeps, multipv: number): Tree
       endFen: fen,
       ownGames: path.lastReply?.ownGames ?? 0,
       explorerGames: path.lastReply?.explorerGames ?? 0,
+      order: path.order,
     });
   }
 
@@ -152,13 +189,31 @@ export function buildTree(root: TreeRoot, deps: TreeDeps, multipv: number): Tree
 
     const taken = takeReplies(
       legal.map((l) => l.reply),
-      MAX_BRANCHES - open + 1,
+      MAX_REPLIES,
     );
-    open += taken.length - 1;
-    for (const reply of taken) {
+    taken.forEach((reply, rank) => {
       const next = legal.find((l) => l.reply.uci === reply.uci)!;
-      visit(next.fen, ply + 1, { uci: [...path.uci, reply.uci], san: [...path.san, next.san], lastReply: reply });
-    }
+      const share = reply.source === "own" ? reply.ownGames / ownGames : reply.explorerShare;
+      const child: Path = {
+        uci: [...path.uci, reply.uci],
+        san: [...path.san, next.san],
+        lastReply: reply,
+        weight: path.weight * share,
+        explorerOnly: path.explorerOnly || reply.source === "explorer",
+        order: [...path.order, rank],
+      };
+      // La réponse la plus fréquente prolonge le chemin ; les autres attendent une place dans le budget.
+      if (rank === 0) visit(next.fen, ply + 1, child);
+      else extras.push({ fen: next.fen, ply: ply + 1, path: child, seq: seq++ });
+    });
+  }
+
+  /** Réponse supplémentaire la plus prioritaire, retirée de la file. */
+  function nextExtra(): Extra | undefined {
+    if (extras.length === 0) return undefined;
+    let best = 0;
+    for (let i = 1; i < extras.length; i++) if (ranksBefore(extras[i], extras[best])) best = i;
+    return extras.splice(best, 1)[0];
   }
 
   function computeKind(): "punish" | "master" | null {
@@ -187,14 +242,20 @@ export function buildTree(root: TreeRoot, deps: TreeDeps, multipv: number): Tree
     });
   }
 
-  visit(root.fen, root.ply, { uci: [], san: [], lastReply: null });
+  visit(root.fen, root.ply, { uci: [], san: [], lastReply: null, weight: 1, explorerOnly: false, order: [] });
+  // Les descendants d'une réponse ne passent jamais avant elle : traiter la file par priorité décroissante
+  // répartit les feuilles par fréquence sur tout l'arbre, sans développer les réponses écartées.
+  for (let extra = nextExtra(); extra && open < MAX_BRANCHES; extra = nextExtra()) {
+    open++;
+    visit(extra.fen, extra.ply, extra.path);
+  }
   const kind = computeKind();
 
   return {
     complete: needs.size === 0 && needsReplies.size === 0,
     needs: [...needs.values()],
     needsReplies: [...needsReplies],
-    branches,
+    branches: branches.sort((a, b) => compareOrder(a.order, b.order)).map(({ order: _order, ...branch }) => branch),
     kind,
   };
 }

@@ -168,6 +168,62 @@ describe("buildTree", () => {
     expect(result.branches.length + result.needsReplies.length).toBeLessThanOrEqual(MAX_BRANCHES);
   });
 
+  it("élagage par fréquence sur tout l'arbre : parties propres d'abord, explorateur seul en dernier", () => {
+    const firstLegal = (fen: string) => moveToUci(new Chess(fen).moves({ verbose: true })[0]);
+    const after = (fen: string, uci: string) => {
+      const chess = new Chess(fen);
+      chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+      return chess.fen();
+    };
+    const legalUci = (fen: string) => new Chess(fen).moves({ verbose: true }).map((m) => ({ uci: moveToUci(m), san: m.san }));
+    const own = new Map<string, Own>();
+    const explorer = new Map<string, ExplorerResult | null>();
+
+    // Racine (Leonel au trait, demi-coup 16) → nœud adverse : r1 50 %, r2 30 %, r3 20 % (parties propres).
+    const n0 = after(START, firstLegal(START));
+    const roots = legalUci(n0).slice(0, 3);
+    own.set(toEpd(n0), roots.map((m, i) => ({ ...m, games: [50, 30, 20][i] })));
+    // Sous-réponses (demi-coup 19) ; la partie s'arrête au demi-coup 21 (phase).
+    const subGames = [
+      [60, 30, 10], // r1 : 0,30 / 0,15 / 0,05
+      [90, 10], // r2 : 0,27 / 0,03, plus une réponse de l'explorateur seul (50 %)
+      [40, 35, 25], // r3 : 0,08 / 0,07 / 0,05
+    ];
+    const subs: { uci: string; san: string }[][] = [];
+    roots.forEach((r, i) => {
+      const afterReply = after(n0, r.uci);
+      const node = after(afterReply, firstLegal(afterReply));
+      const moves = legalUci(node).slice(0, 3);
+      subs.push(moves);
+      own.set(toEpd(node), subGames[i].map((games, j) => ({ ...moves[j], games })));
+      if (i === 1) {
+        explorer.set(toEpd(node), { total: 1000, moves: [{ ...moves[2], games: 500, share: 0.5 }] });
+      }
+    });
+
+    const deps = fakeDeps({
+      analysisFn: (fen, multipv) => ({ ...analysisOf(fen, firstLegal(fen)), multipv }),
+      ownFn: (epd) => own.get(epd) ?? [],
+      explorerFn: (epd) => explorer.get(epd) ?? null,
+    });
+    const result = buildTree({ fen: START, ply: 16, playerColor: "w", prefixUci: [], bookName: null }, deps, 3);
+    expect(result.complete).toBe(true);
+    expect(result.branches.length).toBe(MAX_BRANCHES);
+    const count = (i: number) => result.branches.filter((b) => b.pathUci[1] === roots[i].uci).length;
+    expect([count(0), count(1), count(2)]).toEqual([3, 2, 3]);
+    const taken = (i: number, j: number) =>
+      result.branches.some((b) => b.pathUci[1] === roots[i].uci && b.pathUci[3] === subs[i][j].uci);
+    // La réponse de l'explorateur seul (0,15) passe après la réponse propre la plus rare (r2 b, 0,03).
+    expect(taken(1, 2)).toBe(false);
+    expect(taken(1, 1)).toBe(true);
+    // r3 c (0,05) est retenue, bien que r3 soit la réponse la moins fréquente à la racine.
+    expect(taken(2, 2)).toBe(true);
+    // Ordre stable : celui de l'arbre (réponse la plus fréquente d'abord à chaque nœud).
+    expect(result.branches.map((b) => b.pathUci[1])).toEqual([
+      roots[0].uci, roots[0].uci, roots[0].uci, roots[1].uci, roots[1].uci, roots[2].uci, roots[2].uci, roots[2].uci,
+    ]);
+  });
+
   it("mat dans une ligne-piège : la branche s'arrête sur la position de mat, sans analyse moteur", () => {
     // 1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7#
     const prefix = ["e2e4", "e7e5", "f1c4", "b8c6", "d1h5", "g8f6"];
