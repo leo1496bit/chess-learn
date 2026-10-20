@@ -21,6 +21,16 @@ lines.sort((a, b) => a.moves.length - b.moves.length);
 
 const epd = (fen) => fen.split(" ").slice(0, 4).join(" ");
 
+/** Index des noms : [eco, nom, coups UCI] pour la recherche d'ouvertures. */
+const names = lines.map((line) => {
+  const chess = new Chess();
+  const uci = line.moves.map((san) => {
+    const m = chess.move(san);
+    return m.from + m.to + (m.promotion ?? "");
+  });
+  return [line.eco, line.name, uci.join(" ")];
+});
+
 // 1er passage : positions où s'arrête une ligne nommée (la ligne la plus courte l'emporte).
 const exact = new Map();
 for (const line of lines) {
@@ -45,4 +55,5 @@ for (const line of lines) {
   }
 }
 writeFileSync("src/lib/openings/book.json", JSON.stringify(book));
+writeFileSync("src/lib/openings/names.json", JSON.stringify(names));
 console.log(`${lines.length} lignes, ${Object.keys(book).length} positions`);
