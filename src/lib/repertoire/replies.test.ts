@@ -32,6 +32,25 @@ describe("mergeReplies", () => {
     expect(merged.filter((r) => r.uci === "e4d5")).toHaveLength(1);
   });
 
+  it("départage les égalités par coup UCI, quel que soit l'ordre reçu", () => {
+    const tiedOwn = [
+      { uci: "g8f6", san: "Nf6", games: 4 },
+      { uci: "b8c6", san: "Nc6", games: 4 },
+    ];
+    const tiedExplorer = {
+      total: 100,
+      moves: [
+        { uci: "h7h6", san: "h6", games: 30, share: 0.3 },
+        { uci: "a7a6", san: "a6", games: 30, share: 0.3 },
+      ],
+    };
+    const expected = ["b8c6", "g8f6", "a7a6", "h7h6"];
+    expect(mergeReplies(tiedOwn, tiedExplorer).map((r) => r.uci)).toEqual(expected);
+    expect(
+      mergeReplies([...tiedOwn].reverse(), { ...tiedExplorer, moves: [...tiedExplorer.moves].reverse() }).map((r) => r.uci),
+    ).toEqual(expected);
+  });
+
   it("sans explorateur, ne garde que les réponses own", () => {
     expect(mergeReplies(own, null).map((r) => r.san)).toEqual(["exd5", "Be2"]);
   });

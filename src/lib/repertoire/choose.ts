@@ -18,6 +18,7 @@ import {
   PUNISH_LOSS,
   THIN_EXPLORER_GAMES,
 } from "./constants";
+import { byUciOrder } from "./replies";
 
 /** Coups candidats de Leonel (UCI) : livre et explorateur d'abord, puis part de l'explorateur. */
 export function playerCandidates(
@@ -39,7 +40,7 @@ export function playerCandidates(
     if (!inBook && share === undefined) continue;
     scored.push({ uci, both: inBook && share !== undefined, share: share ?? 0 });
   }
-  scored.sort((a, b) => Number(b.both) - Number(a.both) || b.share - a.share);
+  scored.sort((a, b) => Number(b.both) - Number(a.both) || b.share - a.share || byUciOrder(a.uci, b.uci));
   return scored.slice(0, PLAYER_CANDIDATES).map((s) => s.uci);
 }
 

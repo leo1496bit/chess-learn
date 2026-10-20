@@ -64,6 +64,22 @@ describe("playerCandidates", () => {
     for (const uci of result) expect(["e2e4", "c2c4", "g1f3"]).toContain(uci);
   });
 
+  it("départage les égalités par coup UCI, pas par l'ordre de génération de chess.js", () => {
+    const tiedBook: OpeningBook = {
+      [toEpd(after(START, "e4"))]: ["B00", "King's Pawn Game", 1],
+      [toEpd(after(START, "Nc3"))]: ["A00", "Van Geet Opening", 1],
+    };
+    expect(playerCandidates(START, tiedBook, null)).toEqual(["b1c3", "e2e4"]);
+    const explorer = {
+      total: 100,
+      moves: [
+        { uci: "d2d4", san: "d4", games: 30, share: 0.3 },
+        { uci: "b1c3", san: "Nc3", games: 30, share: 0.3 },
+      ],
+    };
+    expect(playerCandidates(START, {}, explorer)).toEqual(["b1c3", "d2d4"]);
+  });
+
   it("ignore un coup d'explorateur illégal", () => {
     const explorer = {
       total: 10,

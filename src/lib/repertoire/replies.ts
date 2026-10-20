@@ -11,6 +11,11 @@ export type Reply = {
   source: "own" | "explorer";
 };
 
+/** Départage déterministe des égalités de fréquence (comme `opening_reply_stats`). */
+export function byUciOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function mergeReplies(
   own: { uci: string; san: string; games: number }[],
   explorer: ExplorerResult | null,
@@ -47,11 +52,11 @@ export function mergeReplies(
   const fromOwn = all
     .filter((r) => r.ownGames >= OWN_MIN_GAMES)
     .map((r): Reply => ({ ...r, source: "own" }))
-    .sort((a, b) => b.ownGames - a.ownGames);
+    .sort((a, b) => b.ownGames - a.ownGames || byUciOrder(a.uci, b.uci));
   const fromExplorer = all
     .filter((r) => r.ownGames < OWN_MIN_GAMES && r.explorerShare >= EXPLORER_MIN_SHARE)
     .map((r): Reply => ({ ...r, source: "explorer" }))
-    .sort((a, b) => b.explorerShare - a.explorerShare);
+    .sort((a, b) => b.explorerShare - a.explorerShare || byUciOrder(a.uci, b.uci));
   return [...fromOwn, ...fromExplorer];
 }
 
