@@ -8,6 +8,8 @@ const BODY = {
   moves: [{ uci: "g1f3", san: "Nf3", white: 30, draws: 5, black: 15 }],
 };
 
+const START_EPD = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+
 function fakeFetch(status: number, body: unknown = BODY) {
   const calls: { url: string; init?: RequestInit }[] = [];
   const impl = (async (url: string, init?: RequestInit) => {
@@ -30,7 +32,7 @@ describe("fetchExplorer", () => {
 
   it("calcule total, parties et parts", async () => {
     const { impl } = fakeFetch(200);
-    expect(await fetchExplorer("x", "t0k", impl)).toEqual({
+    expect(await fetchExplorer(START_EPD, "t0k", impl)).toEqual({
       total: 100,
       moves: [{ uci: "g1f3", san: "Nf3", games: 50, share: 0.5 }],
     });
@@ -38,12 +40,12 @@ describe("fetchExplorer", () => {
 
   it("part nulle quand le total est nul", async () => {
     const { impl } = fakeFetch(200, { white: 0, draws: 0, black: 0, moves: [{ uci: "a2a3", san: "a3", white: 0, draws: 0, black: 0 }] });
-    expect((await fetchExplorer("x", "t", impl)).moves[0].share).toBe(0);
+    expect((await fetchExplorer(START_EPD, "t", impl)).moves[0].share).toBe(0);
   });
 
   it("429 -> rate_limited, 401 -> unauthorized, 500 -> unavailable", async () => {
     for (const [status, code] of [[429, "rate_limited"], [401, "unauthorized"], [500, "unavailable"]] as const) {
-      const err = await fetchExplorer("x", "t", fakeFetch(status).impl).catch((e) => e);
+      const err = await fetchExplorer(START_EPD, "t", fakeFetch(status).impl).catch((e) => e);
       expect(err).toBeInstanceOf(ExplorerError);
       expect(err.code).toBe(code);
     }
@@ -53,16 +55,44 @@ describe("fetchExplorer", () => {
     const impl = (async () => {
       throw new Error("boom");
     }) as unknown as typeof fetch;
-    const err = await fetchExplorer("x", "SECRET", impl).catch((e) => e);
+    const err = await fetchExplorer(START_EPD, "SECRET", impl).catch((e) => e);
     expect(err.code).toBe("unavailable");
     expect(err.message).not.toContain("SECRET");
   });
 
   it("ignore les coups sans uci/san, rejette un corps sans moves", async () => {
     const ok = fakeFetch(200, { white: 1, draws: 0, black: 0, moves: [{ san: "x", white: 1 }, { uci: "e2e4", san: "e4", white: 1, draws: 0, black: 0 }] });
-    expect((await fetchExplorer("x", "t", ok.impl)).moves.map((m) => m.uci)).toEqual(["e2e4"]);
-    const err = await fetchExplorer("x", "t", fakeFetch(200, { white: 1 }).impl).catch((e) => e);
+    expect((await fetchExplorer(START_EPD, "t", ok.impl)).moves.map((m) => m.uci)).toEqual(["e2e4"]);
+    const err = await fetchExplorer(START_EPD, "t", fakeFetch(200, { white: 1 }).impl).catch((e) => e);
     expect(err.code).toBe("unavailable");
+  });
+});
+
+describe("fetchExplorer : normalisation par chess.js", () => {
+  // 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 : le roque est légal pour les Blancs.
+  const EPD = "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq -";
+
+  it("roque envoyé en roi-prend-tour (e1h1) : UCI de chess.js (e1g1)", async () => {
+    const { impl } = fakeFetch(200, {
+      white: 1,
+      draws: 0,
+      black: 0,
+      moves: [{ uci: "e1h1", san: "O-O", white: 1, draws: 0, black: 0 }],
+    });
+    expect((await fetchExplorer(EPD, "t", impl)).moves).toEqual([{ uci: "e1g1", san: "O-O", games: 1, share: 1 }]);
+  });
+
+  it("ignore un coup dont le SAN est illégal dans la position", async () => {
+    const { impl } = fakeFetch(200, {
+      white: 2,
+      draws: 0,
+      black: 0,
+      moves: [
+        { uci: "e1c1", san: "O-O-O", white: 1, draws: 0, black: 0 },
+        { uci: "d2d3", san: "d3", white: 1, draws: 0, black: 0 },
+      ],
+    });
+    expect((await fetchExplorer(EPD, "t", impl)).moves.map((m) => m.uci)).toEqual(["d2d3"]);
   });
 });
 

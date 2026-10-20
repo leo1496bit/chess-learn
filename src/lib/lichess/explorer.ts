@@ -1,5 +1,7 @@
 // Client de l'explorateur Lichess (parties de joueurs 1000-1600). Serveur uniquement : le jeton ne
 // quitte jamais le serveur, n'est ni journalisé ni inclus dans les messages d'erreur.
+import { Chess } from "chess.js";
+import { moveToUci } from "@/lib/analysis/lines";
 
 export type ExplorerMove = { uci: string; san: string; games: number; share: number };
 export type ExplorerResult = { total: number; moves: ExplorerMove[] };
@@ -49,14 +51,34 @@ export async function fetchExplorer(
   if (!body || !Array.isArray(body.moves)) {
     throw new ExplorerError("unavailable", "Explorateur Lichess : réponse inattendue");
   }
+  let chess: Chess;
+  try {
+    chess = new Chess(`${epd} 0 1`);
+  } catch {
+    throw new ExplorerError("unavailable", "Explorateur Lichess : position invalide");
+  }
   const total = (body.white ?? 0) + (body.draws ?? 0) + (body.black ?? 0);
   const moves: ExplorerMove[] = [];
   for (const m of body.moves) {
     if (!m || typeof m.uci !== "string" || typeof m.san !== "string") continue;
+    // UCI recalculé par chess.js depuis le SAN : Lichess peut coder le roque en roi-prend-tour (e1h1).
+    const uci = normalisedUci(chess, m.san);
+    if (!uci) continue; // SAN illégal dans la position : ignoré
     const games = (m.white ?? 0) + (m.draws ?? 0) + (m.black ?? 0);
-    moves.push({ uci: m.uci, san: m.san, games, share: total > 0 ? games / total : 0 });
+    moves.push({ uci, san: m.san, games, share: total > 0 ? games / total : 0 });
   }
   return { total, moves };
+}
+
+/** UCI de chess.js pour un SAN joué dans la position, ou `null` s'il est illégal. */
+function normalisedUci(chess: Chess, san: string): string | null {
+  try {
+    const move = chess.move(san);
+    chess.undo();
+    return moveToUci(move);
+  } catch {
+    return null;
+  }
 }
 
 /** Vérifie la forme d'un résultat (ligne de cache) avant de s'en servir. */
