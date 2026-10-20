@@ -33,6 +33,37 @@ Chess.com API ──(serveur: /api/sync)──► games (Supabase)
 (`book.ts`) ; `identifyOpening` / `theoryForPly` (purs) situent chaque coup dans la théorie. La page
 `/games/[id]` calcule l'ouverture côté serveur et la passe au client.
 
+### Lignes d'ouverture à maîtriser
+
+```
+parties (games) ─► game_positions (EPD, 30 premiers demi-coups) ─► RPC opening_position_stats / opening_root_stats / opening_reply_stats
+page /openings ─► POST /api/openings/lines (suggestion ou ajout manuel) ─► opening_lines
+page /openings/[id] ─► POST /api/openings/lines/[id]/build (boucle) ─► arbre + opening_branches
+        ▲                          │ réponse : analyses manquantes (needs, profondeur demandée)
+        └── Stockfish (navigateur) ┘ ─► position_analyses (cache) ; explorateur Lichess ─► explorer_cache (30 j)
+récitation ─► POST /api/openings/branches/[id]/move (verdict serveur) ; /review (SM-2)
+« Expliquer la branche » ─► POST /api/openings/branches/[id]/explain ─► Claude Haiku 5.5 ─► opening_branch_explanations + ai_usage
+```
+
+- Tables (migration `20261021000000_opening_lines.sql`, RLS) : `game_positions`, `opening_lines`,
+  `opening_branches`, `opening_branch_explanations`, `explorer_cache`. RPC : `opening_reply_stats`
+  (tri par fréquence puis coup UCI, `20261022000000_opening_reply_order.sql`),
+  `opening_position_stats`, `opening_root_stats`.
+- Arbre (`tree.ts`) : élagage par fréquence sur tout l'arbre, expansion « meilleur d'abord » (la réponse
+  la plus fréquente de chaque nœud ouvert, puis les autres par poids de chemin, parties propres avant
+  explorateur seul, ≤ 8 feuilles) ; seules les réponses retenues sont développées.
+- Explorateur pendant une étape de construction : appels un par un, budget par étape ; un 429 arrête
+  l'explorateur pour l'étape et la réponse porte `retryAfterMs: 60000`, que le navigateur attend
+  (« Lichess limite les requêtes : reprise dans 1 min. ») sans compter l'étape comme bloquée. Sans jeton,
+  la réponse porte `explorerUnavailable: true` (la colonne n'est écrite qu'après un 401).
+- IA par branche : client à 25 s par appel sans nouvel essai du SDK (route limitée à 60 s), nouvelle
+  tentative de vérification sautée après 30 s ; si elle échoue, la première réponse est gardée non vérifiée.
+- Routes `/api/openings` : `backfill`, `search`, `lines` (+ `lines/[id]/build`, `rebuild`),
+  `branches/[id]/move`, `review`, `explain`. Pages : `/openings` (bibliothèque, suggestions) et
+  `/openings/[id]` (arbre, étude, récitation).
+- Code : `src/lib/repertoire/*` (pur, testé), `src/lib/lichess/explorer.ts` (jeton `LICHESS_TOKEN` serveur
+  uniquement, sans autorisation), `src/lib/ai/branch/*`. Règles : skill chess-analysis §13.
+
 ## Contrats entre modules
 
 ### Moteur — `src/lib/engine/` (propriétaire : module Analyse)

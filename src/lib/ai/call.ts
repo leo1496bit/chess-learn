@@ -12,8 +12,9 @@ export type MessagesClient = {
   messages: { create(body: Anthropic.MessageCreateParamsNonStreaming): PromiseLike<Anthropic.Message> };
 };
 
-export function createAnthropicClient(timeoutMs = 30_000): Anthropic {
-  return new Anthropic({ apiKey: serverEnv.anthropicApiKey, timeout: timeoutMs, maxRetries: 2 });
+/** `maxRetries` : nouveaux essais du SDK (2 par défaut) ; à réduire quand la route a une limite de durée. */
+export function createAnthropicClient(timeoutMs = 30_000, opts: { maxRetries?: number } = {}): Anthropic {
+  return new Anthropic({ apiKey: serverEnv.anthropicApiKey, timeout: timeoutMs, maxRetries: opts.maxRetries ?? 2 });
 }
 
 export class AiError extends Error {

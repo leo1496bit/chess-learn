@@ -30,6 +30,11 @@ Variables (`.env.local`, jamais commité) :
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clé publishable Supabase (les données sont protégées par la RLS) |
 | `ALLOWED_EMAIL` | Seule adresse autorisée à se connecter |
 | `CHESSCOM_USERNAME` | Identifiant Chess.com par défaut |
+| `LICHESS_TOKEN` | Optionnel : jeton de l'explorateur d'ouvertures Lichess, **serveur uniquement** |
+
+`LICHESS_TOKEN` se crée sur lichess.org/account/oauth/token **sans cocher aucune autorisation (scope)**.
+Sur Vercel, l'ajouter comme variable *Sensitive* ; en local, dans `.env.local`. Sans lui, les lignes
+d'ouverture se construisent sans les statistiques de l'explorateur.
 
 ### Base de données
 
@@ -52,6 +57,7 @@ npm run dev        # http://localhost:3000
 3. Ouvrir une partie › « Analyser cette partie » (Stockfish tourne dans le navigateur).
 4. Sur une erreur, « Expliquer ce coup » pour l'explication pédagogique (appel IA facturé, mis en cache).
 5. **Entraînement** pour rejouer ses propres erreurs sous forme d'exercices.
+6. **Ouvertures** pour construire des lignes à maîtriser (suggestions tirées de vos parties, arbre, étude, récitation, révision espacée).
 
 ## Commandes
 
