@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchMoveLinks, branchPositions, branchStatus, buildLineTree, replyGamesLabel, startBuildGuard, stepBuildGuard } from "./line-view";
+import { branchMoveLinks, branchPositions, branchStatus, buildLineTree, passesThrough, replyGamesLabel, startBuildGuard, stepBuildGuard } from "./line-view";
 
 const ROOT_W = "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"; // après 1. e4 c6, Blancs au trait
 
@@ -137,5 +137,16 @@ describe("replyGamesLabel", () => {
 
   it("indique Lichess quand la réponse ne vient que de l'explorateur", () => {
     expect(replyGamesLabel(0)).toBe("Lichess");
+  });
+});
+
+describe("passesThrough", () => {
+  const a = ["Nc3", "d5", "Nf3", "dxe4"];
+  it("vrai si la branche suit le même chemin jusqu'au coup cliqué", () => {
+    expect(passesThrough(a, ["Nc3", "d5", "Nf3", "Bg4"], 2)).toBe(true);
+  });
+  it("faux si le chemin diverge avant le coup, ou si la branche est plus courte", () => {
+    expect(passesThrough(a, ["Nc3", "e5"], 1)).toBe(false);
+    expect(passesThrough(["Nc3"], a, 2)).toBe(false);
   });
 });

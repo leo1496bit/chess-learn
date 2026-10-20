@@ -32,6 +32,12 @@ export type TreeMove = {
   branchId: string;
 };
 
+/** La branche `branchSan` passe-t-elle par le coup `index` du chemin `viaSan` (mêmes coups jusqu'à lui inclus) ? */
+export function passesThrough(branchSan: readonly string[], viaSan: readonly string[], index: number): boolean {
+  if (branchSan.length <= index || viaSan.length <= index) return false;
+  return viaSan.slice(0, index + 1).every((san, i) => branchSan[i] === san);
+}
+
 /** Libellé d'une réponse adverse : parties de Leonel, ou « Lichess » si elle ne vient que de l'explorateur. */
 export function replyGamesLabel(ownGames: number): string {
   if (ownGames === 0) return "Lichess";

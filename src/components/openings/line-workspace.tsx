@@ -11,6 +11,7 @@ import {
   BRANCH_STATUS_LABELS,
   branchPositions,
   branchStatus,
+  passesThrough,
   type BranchStatus,
   type LinePageBranch,
   type LinePageLine,
@@ -79,23 +80,21 @@ export function LineWorkspace({
   /** Clic sur un coup de l'arbre : garder la branche sélectionnée si elle passe par ce coup. */
   function showMove(move: TreeMove) {
     const via = branches.find((b) => b.id === move.branchId);
-    const keep =
-      selected !== null && via !== undefined && via.pathSan.slice(0, move.index + 1).every((san, i) => selected.pathSan[i] === san);
+    const keep = selected !== null && via !== undefined && passesThrough(selected.pathSan, via.pathSan, move.index);
     if (!keep) setSelectedId(move.branchId);
     setPly(move.index + 1);
   }
 
-  // ← / → parcourent la branche sélectionnée, Début revient à la position de départ (hors étude et récitation).
+  // ← / → parcourent la branche sélectionnée (hors étude et récitation, hors champs et widgets qui utilisent ces touches).
   useEffect(() => {
     if (mode.kind !== "browse") return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
-      if (event.key === "ArrowLeft") setPly((p) => Math.max(0, (p ?? lastPly) - 1));
-      else if (event.key === "ArrowRight") setPly((p) => Math.min(lastPly, (p ?? lastPly) + 1));
-      else if (event.key === "Home") setPly(0);
-      else if (event.key === "End") setPly(null);
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (target?.closest('[role="slider"], [role="tab"], [role="tablist"], [role="listbox"], [role="menu"]')) return;
+      if (event.key === "ArrowLeft") setPly((p) => Math.max(0, Math.min(p ?? lastPly, lastPly) - 1));
+      else if (event.key === "ArrowRight") setPly((p) => Math.min(lastPly, Math.min(p ?? lastPly, lastPly) + 1));
       else return;
       event.preventDefault();
     };
@@ -160,6 +159,7 @@ export function LineWorkspace({
 
   function study(id: string) {
     setSelectedId(id);
+    setPly(null);
     setMode({ kind: "study", branchId: id });
     if (!ideasFor(id)) void requestIdeas(id);
   }

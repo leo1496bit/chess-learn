@@ -19,13 +19,16 @@ type BuildResponse = {
 };
 
 type RunState =
-  | { kind: "running"; remaining: number; step: number; analysed: number; branches: number }
+  | { kind: "running"; remaining: number; step: number; analysed: number; branches: number; bar: number }
   | { kind: "waiting"; analysed: number; branches: number }
   | { kind: "ready"; branches: number }
   | { kind: "stalled" }
   | { kind: "error"; message: string };
 
 const STALLED_MESSAGE = "La construction n'avance plus. Réessaie dans quelques minutes.";
+/** Taille typique d'une ligne : sert d'estimation au départ, le total réel n'étant connu qu'à la fin. */
+const TYPICAL_POSITIONS = 150;
+
 const RATE_LIMITED_MESSAGE = "Lichess limite les requêtes : reprise dans 1 min.";
 
 /** Attente interruptible (quitter la page annule la boucle). */
@@ -71,7 +74,7 @@ export function BuildRunner({
   initialExplorerUnavailable: boolean;
   onReady: () => void;
 }) {
-  const [state, setState] = useState<RunState>({ kind: "running", remaining: 0, step: 0, analysed: 0, branches: 0 });
+  const [state, setState] = useState<RunState>({ kind: "running", remaining: 0, step: 0, analysed: 0, branches: 0, bar: 0 });
   // Durée affichée : rafraîchie toutes les 15 s pour montrer que la construction vit.
   const [startedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
@@ -94,7 +97,13 @@ export function BuildRunner({
     async function run() {
       let guard = startBuildGuard();
       let analysed = 0;
-      setState({ kind: "running", remaining: 0, step: 0, analysed: 0, branches: 0 });
+      // Avancement estimé (total inconnu) : jamais en recul, jamais plein avant la fin.
+      let bar = 0;
+      const estimate = (remaining: number) => {
+        bar = Math.max(bar, Math.min(95, (analysed / Math.max(TYPICAL_POSITIONS, analysed + remaining)) * 100));
+        return bar;
+      };
+      setState({ kind: "running", remaining: 0, step: 0, analysed: 0, branches: 0, bar: 0 });
       while (!signal.aborted) {
         const response = await fetch(`/api/openings/lines/${lineId}/build`, { method: "POST", signal });
         const body = (await response.json().catch(() => null)) as (Partial<BuildResponse> & { error?: string }) | null;
@@ -124,7 +133,14 @@ export function BuildRunner({
         }
         // Un seul worker Stockfish : analyses l'une après l'autre.
         for (let i = 0; i < body.needs.length; i++) {
-          setState({ kind: "running", remaining: body.needs.length - i, step: body.needs.length, analysed, branches });
+          setState({
+            kind: "running",
+            remaining: body.needs.length - i,
+            step: body.needs.length,
+            analysed,
+            branches,
+            bar: estimate(body.needs.length - i),
+          });
           const need = body.needs[i];
           await analyzePositionCached(need.fen, { depth: body.depth, multipv: need.multipv, awaitStore: true, signal });
           analysed += 1;
@@ -133,7 +149,7 @@ export function BuildRunner({
           setState({ kind: "waiting", analysed, branches });
           await wait(resumeAt - Date.now(), signal);
         }
-        setState({ kind: "running", remaining: 0, step: 0, analysed, branches });
+        setState({ kind: "running", remaining: 0, step: 0, analysed, branches, bar: estimate(0) });
       }
     }
 
@@ -159,24 +175,22 @@ export function BuildRunner({
 
   return (
     <section aria-label="Construction de la ligne" className="max-w-prose space-y-3 rounded-lg border bg-card p-4">
+      {state.kind === "running" ? (
+        <div className="space-y-2">
+          {/* Seul le total est annoncé aux lecteurs d'écran : la ligne « position i sur n » changerait chaque seconde. */}
+          <p role="status" aria-live="polite" className="text-sm font-medium">
+            Construction de la ligne : {plural(state.analysed, "position analysée", "positions analysées")}
+            {state.branches > 0 ? `, ${plural(state.branches, "branche terminée", "branches terminées")}` : ""}
+          </p>
+          <Progress aria-label="Avancement estimé de la construction" value={state.bar} />
+          <p className="text-sm">{currentLabel(state.remaining, state.step)}</p>
+          <p className="text-sm text-muted-foreground">
+            Une ligne demande souvent une centaine de positions ou plus, soit plusieurs minutes ({elapsedLabel(startedAt, now)}).
+            Garde la page ouverte ; si tu la fermes, la construction reprendra là où elle en est.
+          </p>
+        </div>
+      ) : null}
       <div role="status" aria-live="polite" className="space-y-2">
-        {state.kind === "running" ? (
-          <>
-            <p className="text-sm font-medium">
-              Construction de la ligne : {plural(state.analysed, "position analysée", "positions analysées")}
-              {state.branches > 0 ? `, ${plural(state.branches, "branche terminée", "branches terminées")}` : ""}
-            </p>
-            <Progress
-              aria-label="Avancement de la construction"
-              value={state.analysed + state.remaining > 0 ? (state.analysed / (state.analysed + state.remaining)) * 100 : 0}
-            />
-            <p className="text-sm">{currentLabel(state.remaining, state.step)}</p>
-            <p className="text-sm text-muted-foreground">
-              Une ligne demande en général 100 à 250 positions, soit 5 à 15 minutes ({elapsedLabel(startedAt, now)}).
-              Garde la page ouverte ; si tu la fermes, la construction reprendra là où elle en est.
-            </p>
-          </>
-        ) : null}
         {state.kind === "waiting" ? <p className="text-sm font-medium">{RATE_LIMITED_MESSAGE}</p> : null}
         {state.kind === "ready" ? (
           <p className="text-sm font-medium">
