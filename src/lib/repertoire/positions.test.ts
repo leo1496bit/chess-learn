@@ -45,6 +45,7 @@ describe("openingPositions", () => {
 function fakeSupabase(options: { upsertError?: string } = {}) {
   const upserted: Record<string, unknown>[] = [];
   const indexedIds: string[] = [];
+  const inCalls: string[][] = [];
   const client = {
     from(table: string) {
       if (table === "game_positions") {
@@ -59,6 +60,7 @@ function fakeSupabase(options: { upsertError?: string } = {}) {
       return {
         update: (values: { positions_indexed: boolean }) => ({
           in: async (_column: string, ids: string[]) => {
+            inCalls.push(ids);
             if (values.positions_indexed) indexedIds.push(...ids);
             return { error: null };
           },
@@ -66,7 +68,7 @@ function fakeSupabase(options: { upsertError?: string } = {}) {
       };
     },
   } as unknown as IndexSupabase;
-  return { client, upserted, indexedIds };
+  return { client, upserted, indexedIds, inCalls };
 }
 
 describe("indexGames", () => {
@@ -88,6 +90,15 @@ describe("indexGames", () => {
     expect(upserted.every((r) => r.game_id === "short")).toBe(true);
     expect(upserted[2]).toMatchObject({ ply: 2, move_uci: "b1c3", move_san: "Nc3", side_to_move: "w" });
     expect(indexedIds).toEqual(["short", "empty"]);
+  });
+
+  it("marque un lot de plus de 100 parties en plusieurs requêtes de 100 identifiants au plus", async () => {
+    const { client, indexedIds, inCalls } = fakeSupabase();
+    const games = Array.from({ length: 250 }, (_, i) => ({ id: `g${i}`, pgn: "1. e4 c6 *" }));
+    expect(await indexGames(client, games)).toBe(250);
+    expect(inCalls.length).toBeGreaterThan(1);
+    expect(inCalls.every((ids) => ids.length <= 100)).toBe(true);
+    expect(indexedIds).toEqual(games.map((g) => g.id));
   });
 
   it("ne marque rien si l'écriture des positions échoue (le rattrapage réessaiera)", async () => {

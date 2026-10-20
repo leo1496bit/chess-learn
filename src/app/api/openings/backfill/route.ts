@@ -2,6 +2,8 @@ import { getAuthorizedUser } from "@/lib/db/server";
 import { indexGames } from "@/lib/repertoire/index-games";
 import { BACKFILL_BATCH } from "@/lib/repertoire/constants";
 
+export const maxDuration = 60;
+
 /** Indexe un lot de parties pas encore indexées ; à rappeler tant que `remaining` > 0. */
 export async function POST() {
   const auth = await getAuthorizedUser();
