@@ -1,7 +1,7 @@
 // Prompt des idées d'une branche d'ouverture. Module pur. Le prompt système est FIGÉ (mis en cache côté
 // Anthropic) : toute modification change BRANCH_PROMPT_VERSION, ce qui invalide aussi le cache.
 
-export const BRANCH_PROMPT_VERSION = "branch-v1";
+export const BRANCH_PROMPT_VERSION = "branch-v2";
 export const BRANCH_MAX_TOKENS = 3000;
 
 export const BRANCH_SYSTEM_PROMPT = `Tu es un entraîneur d'échecs qui explique en français une ligne d'ouverture à retenir à un joueur en progression (niveau club). Le moteur Stockfish a analysé les positions et un livre d'ouvertures nomme la ligne : tu reçois ces résultats, déjà calculés et validés. Tu ne calcules rien toi-même ; ton rôle est d'expliquer l'idée de chaque coup et de proposer un plan.
@@ -14,7 +14,7 @@ Règles absolues :
 5. Si les données sont minces, dis-le et mets confidence à "low".
 
 Contenu attendu :
-- moves : une idée pour chaque demi-coup de la branche, de Leonel comme de l'adversaire, avec le champ index exactement comme listé (0 = premier coup après la position de départ). Chaque idée tient en 1 à 2 phrases : ce que le coup vise (développement, centre, sécurité du roi, menace, piège générique) et pourquoi il est joué à cet endroit.
+- moves : une idée pour chaque demi-coup de la branche, du joueur comme de l'adversaire, avec le champ index exactement comme listé (0 = premier coup après la position de départ). Chaque idée tient en 1 à 2 phrases : ce que le coup vise (développement, centre, sécurité du roi, menace, piège générique) et pourquoi il est joué à cet endroit.
 - plan : après avoir expliqué l'idée de chaque coup, termine par un plan de milieu de partie fondé sur la position finale et la variante fournie (pièces à placer, cases clés, coups typiques, 3 à 5 phrases).
 - confidence.
 

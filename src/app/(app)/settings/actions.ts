@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { getAuthorizedUser } from "@/lib/db/server";
+import { createChesscomClient } from "@/lib/chesscom/client";
+import { checkChesscomAccount } from "@/lib/chesscom/verify";
 import { getSettings } from "@/lib/db/settings";
 import { SettingsFormSchema, type SettingsActionState, type SettingsField } from "@/components/settings/settings-schema";
 
@@ -39,7 +41,13 @@ export async function saveSettings(_previous: SettingsActionState, formData: For
 
   const values = parsed.data;
   try {
-    await getSettings(auth.supabase); // crée la ligne au premier enregistrement
+    const current = await getSettings(auth.supabase);
+    if (current.chesscomUsername.toLowerCase() !== values.chesscomUsername.toLowerCase()) {
+      const account = await checkChesscomAccount(createChesscomClient(), values.chesscomUsername);
+      if (account.status !== "ok") {
+        return { status: "error", message: "Corrige le champ signalé, puis enregistre.", fieldErrors: { chesscomUsername: account.message } };
+      }
+    }
     const { error } = await auth.supabase
       .from("settings")
       .update({

@@ -62,7 +62,7 @@ describe("buildBranchInput", () => {
   it("transmet le nom du livre, la catégorie et la couleur", () => {
     expect(input.text).toContain("King's Pawn Game: Open Game (C20)");
     expect(input.text).toContain("Catégorie : à maîtriser.");
-    expect(input.text).toContain("Leonel joue les Blancs.");
+    expect(input.text).toContain("Le joueur joue les Blancs.");
     expect(input.protectedPhrases).toEqual(["King's Pawn Game: Open Game"]);
   });
 
@@ -76,7 +76,7 @@ describe("buildBranchInput", () => {
   });
 
   it("indique l'auteur de chaque coup et les pièces de la position finale", () => {
-    expect(input.text).toContain("index 0 : 2. Nf3 (Leonel)");
+    expect(input.text).toContain("index 0 : 2. Nf3 (joueur)");
     expect(input.text).toContain("index 1 : 2... Nc6 (adversaire)");
     expect(input.text).toContain(END_FEN);
     expect(input.text).toContain("Pièces des Blancs :");
@@ -347,6 +347,6 @@ describe("generateBranchIdeas", () => {
   });
 
   it("est versionné", () => {
-    expect(BRANCH_PROMPT_VERSION).toBe("branch-v1");
+    expect(BRANCH_PROMPT_VERSION).toBe("branch-v2");
   });
 });

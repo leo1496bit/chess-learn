@@ -10,7 +10,7 @@ export const BranchIdeasSchema = z.object({
         idea: z.string().describe("Idée du coup en 1 à 2 phrases ; pour un coup adverse, une hypothèse."),
       }),
     )
-    .describe("Une idée pour chaque demi-coup de la branche, de Leonel comme de l'adversaire."),
+    .describe("Une idée pour chaque demi-coup de la branche, du joueur comme de l'adversaire."),
   plan: z.string().describe("Plan de milieu de partie fondé sur la position finale et la variante fournie."),
   confidence: z.enum(CONFIDENCE_LEVELS),
 });

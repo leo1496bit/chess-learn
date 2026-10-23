@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
-import { publicEnv, serverEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/env";
 
 /** Client Supabase côté serveur, lié à la session (cookies) de l'utilisateur. La RLS s'applique. */
 export async function createSupabaseServerClient() {
@@ -29,12 +29,11 @@ export async function createSupabaseServerClient() {
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
-/** Utilisateur connecté et autorisé, ou null. */
+/** Utilisateur connecté, ou null. */
 export async function getAuthorizedUser(): Promise<{ user: User; supabase: SupabaseServerClient } | null> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) return null;
-  if (data.user.email?.toLowerCase() !== serverEnv.allowedEmail.toLowerCase()) return null;
   return { user: data.user, supabase };
 }
 
