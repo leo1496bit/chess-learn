@@ -1,7 +1,7 @@
 # chess-learn
 
-Application web personnelle d'analyse de mes parties Chess.com (`Leny_l`) : Stockfish calcule,
-Claude Haiku 5.5 explique. Cahier des charges complet : `description.md`.
+Application web d'analyse de parties Chess.com (bêta ouverte à plusieurs utilisateurs ; compte de
+Leonel : `Leny_l`) : Stockfish calcule, Claude Haiku 5.5 explique. Cahier des charges complet : `description.md`.
 
 ## Règle obligatoire
 
@@ -32,7 +32,9 @@ react-chessboard + chess.js, Stockfish WASM (Web Worker, `public/stockfish/`), S
 ## Sécurité
 
 - `ANTHROPIC_API_KEY` : serveur uniquement (pas de clé service_role : tout passe par la session utilisateur + RLS), dans `.env.local` (ignoré par git). Jamais de préfixe `NEXT_PUBLIC_`.
-- Accès limité à `ALLOWED_EMAIL` ; RLS activée sur toutes les tables.
+- Bêta ouverte : tout e-mail peut se connecter ; l'identifiant Chess.com est choisi à la première
+  connexion (`/welcome`). RLS activée sur toutes les tables (`user_id = auth.uid()`) : chacun ne voit
+  que ses données. Les appels IA de tous les utilisateurs sont payés par la clé de Leonel.
 
 ## Commandes
 

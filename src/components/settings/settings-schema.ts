@@ -14,14 +14,17 @@ const numberField = (label: string, min: number, max: number, integer = false) =
   return z.preprocess((v) => (typeof v === "string" ? (v.trim() === "" ? undefined : v.replace(",", ".")) : v), bounded);
 };
 
+/** Identifiant Chess.com (Paramètres et première connexion). */
+export const ChesscomUsernameSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9_-]{3,25}$/, {
+    error: "Identifiant Chess.com : 3 à 25 caractères (lettres, chiffres, tiret ou tiret bas).",
+  });
+
 export const SettingsFormSchema = z
   .object({
-    chesscomUsername: z
-      .string()
-      .trim()
-      .regex(/^[A-Za-z0-9_-]{3,25}$/, {
-        error: "Identifiant Chess.com : 3 à 25 caractères (lettres, chiffres, tiret ou tiret bas).",
-      }),
+    chesscomUsername: ChesscomUsernameSchema,
     engineDepth: numberField("Profondeur", 8, 30, true),
     engineMultipv: numberField("Lignes candidates", 1, 5, true),
     excellent: numberField("Seuil « excellent »", 0, 100),

@@ -50,11 +50,11 @@ export function buildBranchInput(
   const lines: string[] = [
     `Ouverture (livre d'ouvertures) : ${line.name}${line.eco ? ` (${line.eco})` : ""}.`,
     `Catégorie : ${kindText}.`,
-    `Leonel joue les ${COLOR_NAMES[line.playerColor]}.`,
+    `Le joueur joue les ${COLOR_NAMES[line.playerColor]}.`,
     `Coups avant la position de départ : ${line.prefixSan.length > 0 ? formatSanLine(new Chess().fen(), line.prefixSan) : "(aucun)"}.`,
     `Position de départ (FEN) : ${line.rootFen}`,
     "",
-    "Coups de la branche (index = demi-coup après la position de départ ; Leonel aux index pairs) :",
+    "Coups de la branche (index = demi-coup après la position de départ ; joueur aux index pairs) :",
   ];
 
   const chess = new Chess(line.rootFen);
@@ -63,12 +63,12 @@ export function buildBranchInput(
     fens.push(chess.fen());
     const turn = chess.turn();
     if (!playUci(chess, uci)) throw new Error(`Branche : coup ${uci} illégal à l'index ${index}`);
-    const by = turn === line.playerColor ? "Leonel" : "adversaire";
+    const by = turn === line.playerColor ? "joueur" : "adversaire";
     lines.push(`- index ${index} : ${formatSanLine(fens[index], [branch.pathSan[index] ?? ""])} (${by})`);
   });
   const endFen = chess.fen();
 
-  lines.push("", "Analyse Stockfish des positions où Leonel joue (évaluations du point de vue des Blancs) :");
+  lines.push("", "Analyse Stockfish des positions où le joueur joue (évaluations du point de vue des Blancs) :");
   let any = false;
   branch.pathUci.forEach((_, index) => {
     if (index % 2 !== 0) return;

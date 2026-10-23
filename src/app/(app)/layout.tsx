@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/db/server";
+import { hasSettings } from "@/lib/db/settings";
 import { AppNav, MobileNav } from "@/components/app-nav";
 import { signOut } from "@/app/login/actions";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
-  const { user } = await requireUser();
+  const { user, supabase } = await requireUser();
+  if (!(await hasSettings(supabase))) redirect("/welcome");
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">

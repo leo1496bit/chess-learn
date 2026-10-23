@@ -4,7 +4,6 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/db/server";
-import { serverEnv } from "@/lib/env";
 
 export type LoginState = { status: "idle" | "sent" | "error"; message?: string };
 
@@ -15,10 +14,6 @@ export async function sendMagicLink(_prev: LoginState, formData: FormData): Prom
   if (!parsed.success) return { status: "error", message: "Adresse e-mail invalide." };
 
   const email = parsed.data.email.toLowerCase();
-  // Même réponse que pour un envoi réussi : ne pas révéler l'adresse autorisée.
-  if (email !== serverEnv.allowedEmail.toLowerCase()) {
-    return { status: "sent", message: "Si cette adresse est autorisée, un lien de connexion a été envoyé." };
-  }
 
   const origin = (await headers()).get("origin") ?? "http://localhost:3000";
   const supabase = await createSupabaseServerClient();
@@ -29,7 +24,7 @@ export async function sendMagicLink(_prev: LoginState, formData: FormData): Prom
   if (error) {
     return { status: "error", message: `Envoi impossible : ${error.message}` };
   }
-  return { status: "sent", message: "Si cette adresse est autorisée, un lien de connexion a été envoyé." };
+  return { status: "sent", message: "Lien envoyé : ouvre l'e-mail reçu pour te connecter." };
 }
 
 export async function signOut() {

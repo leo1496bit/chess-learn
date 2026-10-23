@@ -4,6 +4,9 @@ Application web personnelle d'analyse et de progression aux échecs. Elle récup
 publiques Chess.com, les analyse avec **Stockfish** (dans le navigateur, gratuit) et explique les
 erreurs importantes avec **Claude Haiku 5.5**, à la demande.
 
+Bêta ouverte : toute adresse e-mail peut se connecter par lien magique ; chaque utilisateur choisit son
+identifiant Chess.com à la première connexion (`/welcome`) et ne voit que ses propres données (RLS).
+
 - Cahier des charges : [`description.md`](description.md)
 - Architecture et contrats entre modules : [`docs/architecture.md`](docs/architecture.md)
 - Règles d'analyse (moteur, classification, IA, coûts) : [`.claude/skills/chess-analysis/SKILL.md`](.claude/skills/chess-analysis/SKILL.md)
@@ -28,8 +31,6 @@ Variables (`.env.local`, jamais commité) :
 | `ANTHROPIC_API_KEY` | Clé Anthropic, **serveur uniquement** |
 | `NEXT_PUBLIC_SUPABASE_URL` | URL du projet Supabase |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clé publishable Supabase (les données sont protégées par la RLS) |
-| `ALLOWED_EMAIL` | Seule adresse autorisée à se connecter |
-| `CHESSCOM_USERNAME` | Identifiant Chess.com par défaut |
 | `LICHESS_TOKEN` | Optionnel : jeton de l'explorateur d'ouvertures Lichess, **serveur uniquement** |
 
 `LICHESS_TOKEN` se crée sur lichess.org/account/oauth/token **sans cocher aucune autorisation (scope)**.
