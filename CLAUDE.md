@@ -15,7 +15,7 @@ coups ou des évaluations par l'IA.
 
 Next.js (App Router, `src/`), React, TypeScript strict, Tailwind CSS, shadcn/ui,
 react-chessboard + chess.js, Stockfish WASM (Web Worker, `public/stockfish/`), Supabase
-(Postgres + Auth par lien magique, RLS), `@anthropic-ai/sdk` (`claude-haiku-5-5`), Vitest.
+(Postgres + Auth e-mail/mot de passe, e-mails via SMTP Resend, RLS), `@anthropic-ai/sdk` (`claude-haiku-5-5`), Vitest.
 
 ## Organisation
 
@@ -32,7 +32,8 @@ react-chessboard + chess.js, Stockfish WASM (Web Worker, `public/stockfish/`), S
 ## Sécurité
 
 - `ANTHROPIC_API_KEY` : serveur uniquement (pas de clé service_role : tout passe par la session utilisateur + RLS), dans `.env.local` (ignoré par git). Jamais de préfixe `NEXT_PUBLIC_`.
-- Bêta ouverte : tout e-mail peut se connecter ; l'identifiant Chess.com est choisi à la première
+- Bêta ouverte : inscription libre (`/signup`, e-mail confirmé), connexion e-mail + mot de passe,
+  réinitialisation (`/forgot-password` → `/auth/callback?next=/reset-password`) ; l'identifiant Chess.com est choisi à la première
   connexion (`/welcome`). RLS activée sur toutes les tables (`user_id = auth.uid()`) : chacun ne voit
   que ses données. Les appels IA de tous les utilisateurs sont payés par la clé de Leonel.
 
