@@ -12,6 +12,7 @@ import { TRAINING_CATEGORY_LABELS, type GameReport, type GameReportResponse } fr
 import { buildReportMoveLinks, indexMoveLinks } from "@/lib/ai/move-links";
 import type { MoveAnalysis, Thresholds } from "@/lib/analysis/types";
 import { LinkedText, type MovePreviewProps } from "./linked-text";
+import { THINKING_STEPS, ThinkingStatus } from "./thinking-status";
 
 type State =
   | { kind: "loading" }
@@ -147,7 +148,7 @@ export function GameReportPanel({
       {state.kind === "empty" ? (
         <div className="space-y-3">
           <p className="max-w-prose text-sm text-muted-foreground">
-            Claude rédige un bilan à partir des calculs de Stockfish et du livre d&apos;ouvertures : erreurs tactiques et
+            Un bilan rédigé à partir des calculs de Stockfish et du livre d&apos;ouvertures : erreurs tactiques et
             stratégiques, maîtrise de la théorie, occasions manquées et axes de travail. Coût estimé : moins d&apos;un
             centime.
           </p>
@@ -157,7 +158,7 @@ export function GameReportPanel({
 
       {state.kind === "generating" ? (
         <div role="status" className="space-y-3">
-          <p className="text-sm text-muted-foreground">Claude rédige le bilan à partir des calculs de Stockfish…</p>
+          <ThinkingStatus steps={THINKING_STEPS.report} />
           <Skeleton className="h-4 w-3/4" />
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-5/6" />
