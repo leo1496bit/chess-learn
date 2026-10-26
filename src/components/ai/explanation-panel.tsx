@@ -10,6 +10,7 @@ import type { MoveAnalysis } from "@/lib/analysis/types";
 import { isFlaggedMove } from "@/lib/ai/eligibility";
 import { buildMoveLinks, indexMoveLinks } from "@/lib/ai/move-links";
 import { LinkedText, type MovePreviewProps } from "./linked-text";
+import { THINKING_STEPS, ThinkingStatus } from "./thinking-status";
 import {
   CONFIDENCE_LABELS,
   ERROR_TYPE_LABELS,
@@ -212,7 +213,7 @@ export function ExplanationPanel({
 
       {state.kind === "generating" ? (
         <div role="status" className="space-y-3">
-          <p className="text-sm text-muted-foreground">Claude rédige l&apos;explication à partir des calculs de Stockfish…</p>
+          <ThinkingStatus steps={THINKING_STEPS.move} />
           <Skeleton className="h-4 w-3/4" />
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-5/6" />

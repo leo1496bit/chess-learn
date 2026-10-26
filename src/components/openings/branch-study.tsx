@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ARROW_COLORS, ChessBoard } from "@/components/chess/chess-board";
 import { LinkedText } from "@/components/ai/linked-text";
+import { THINKING_STEPS, ThinkingStatus } from "@/components/ai/thinking-status";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { indexMoveLinks, moveLinkKey, type MoveLink } from "@/lib/ai/move-links";
@@ -208,7 +209,7 @@ function IdeasBody({
   if (entry.kind === "loading") {
     return (
       <div role="status" className="space-y-3">
-        <p className="text-sm text-muted-foreground">Claude rédige les idées de la branche à partir des calculs de Stockfish…</p>
+        <ThinkingStatus steps={THINKING_STEPS.branch} />
         <Skeleton className="h-4 w-3/4" />
         <Skeleton className="h-4 w-full" />
       </div>
