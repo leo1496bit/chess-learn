@@ -4,7 +4,7 @@ Application web personnelle d'analyse et de progression aux échecs. Elle récup
 publiques Chess.com, les analyse avec **Stockfish** (dans le navigateur, gratuit) et explique les
 erreurs importantes avec **Claude Haiku 5.5**, à la demande.
 
-Bêta ouverte : toute adresse e-mail peut se connecter par lien magique ; chaque utilisateur choisit son
+Bêta ouverte : chacun crée un compte (e-mail + mot de passe, confirmé par e-mail) ; chaque utilisateur choisit son
 identifiant Chess.com à la première connexion (`/welcome`) et ne voit que ses propres données (RLS).
 
 - Cahier des charges : [`description.md`](description.md)
@@ -40,12 +40,17 @@ d'ouverture se construisent sans les statistiques de l'explorateur.
 ### Base de données
 
 Appliquer les migrations de `supabase/migrations/` dans l'ordre (éditeur SQL Supabase, ou
-`supabase db push` avec la CLI). Toutes les tables ont la RLS activée et ne sont accessibles qu'à
-l'adresse autorisée.
+`supabase db push` avec la CLI). Toutes les tables ont la RLS activée : chaque utilisateur
+n'accède qu'à ses propres lignes.
 
-Dans Supabase › Authentication › URL Configuration, vérifier que l'URL du site
-(`http://localhost:3000` en local) et l'URL de redirection `http://localhost:3000/auth/callback`
-sont autorisées.
+Authentification Supabase (e-mail + mot de passe) :
+
+- Authentication › Sign In / Providers › Email : activé, avec « Confirm email ».
+- Authentication › URL Configuration : URL du site, et URLs de redirection `http://localhost:3001/**`
+  et `https://<domaine de prod>/**` (les liens de réinitialisation ajoutent `?next=/reset-password`
+  à `/auth/callback`).
+- Authentication › Emails › SMTP Settings : SMTP Resend (`smtp.resend.com`, port 465, utilisateur
+  `resend`, mot de passe = clé API Resend), expéditeur sur un domaine vérifié dans Resend.
 
 ## Lancement
 

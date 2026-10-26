@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/auth"];
 
 /** Rafraîchit la session Supabase et redirige les visiteurs non connectés vers /login. */
 export async function proxy(request: NextRequest) {

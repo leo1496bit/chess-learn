@@ -1,30 +1,21 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { z } from "zod";
+import { authErrorMessage, firstIssue, LoginSchema, type AuthFormState } from "@/lib/auth/forms";
 import { createSupabaseServerClient } from "@/lib/db/server";
 
-export type LoginState = { status: "idle" | "sent" | "error"; message?: string };
+export async function signIn(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
+  const parsed = LoginSchema.safeParse({ email: formData.get("email"), password: formData.get("password") ?? "" });
+  const email = String(formData.get("email") ?? "");
+  if (!parsed.success) return { status: "error", message: firstIssue(parsed.error), email };
 
-const LoginSchema = z.object({ email: z.email() });
-
-export async function sendMagicLink(_prev: LoginState, formData: FormData): Promise<LoginState> {
-  const parsed = LoginSchema.safeParse({ email: formData.get("email") });
-  if (!parsed.success) return { status: "error", message: "Adresse e-mail invalide." };
-
-  const email = parsed.data.email.toLowerCase();
-
-  const origin = (await headers()).get("origin") ?? "http://localhost:3000";
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: `${origin}/auth/callback` },
+  const { error } = await supabase.auth.signInWithPassword({
+    email: parsed.data.email.toLowerCase(),
+    password: parsed.data.password,
   });
-  if (error) {
-    return { status: "error", message: `Envoi impossible : ${error.message}` };
-  }
-  return { status: "sent", message: "Lien envoyé : ouvre l'e-mail reçu pour te connecter." };
+  if (error) return { status: "error", message: authErrorMessage(error), email };
+  redirect("/");
 }
 
 export async function signOut() {
