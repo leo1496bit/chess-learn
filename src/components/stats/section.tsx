@@ -34,7 +34,7 @@ export function Figure({ label, value, note, className }: { label: string; value
     <div className={cn("space-y-0.5", className)}>
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="text-3xl font-semibold tracking-tight text-foreground">{value}</p>
-      {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
+      {note ? <div className="text-sm text-muted-foreground">{note}</div> : null}
     </div>
   );
 }
