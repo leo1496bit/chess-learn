@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { AuthForm } from "@/components/auth/auth-form";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { PASSWORD_MIN } from "@/lib/auth/forms";
@@ -19,6 +20,11 @@ export default async function ResetPasswordPage() {
         pendingLabel="Enregistrement…"
         hint={`Au moins ${PASSWORD_MIN} caractères.`}
       />
+      <p className="text-center text-sm">
+        <Link href="/settings" className="text-muted-foreground hover:text-foreground">
+          Annuler
+        </Link>
+      </p>
     </AuthShell>
   );
 }

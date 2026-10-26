@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/page-header";
 import { SettingsForm } from "@/components/settings/settings-form";
+import { AccountSection } from "@/components/settings/account-section";
 import { AiUsage } from "@/components/settings/ai-usage";
 import { requireUser } from "@/lib/db/server";
 import { getSettings } from "@/lib/db/settings";
@@ -10,7 +11,7 @@ import { saveSettings } from "./actions";
 export const metadata: Metadata = { title: "Paramètres" };
 
 export default async function SettingsPage() {
-  const { supabase } = await requireUser();
+  const { user, supabase } = await requireUser();
   const now = new Date();
   const [settings, summary, recent] = await Promise.all([
     getSettings(supabase),
@@ -31,6 +32,7 @@ export default async function SettingsPage() {
         dailyLimit={settings.aiDailyCallLimit}
         monthlyBudget={settings.aiMonthlyBudgetUsd}
       />
+      <AccountSection email={user.email ?? ""} />
     </>
   );
 }
